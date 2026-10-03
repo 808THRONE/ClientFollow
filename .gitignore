@@ -1,0 +1,51 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Testing & Coverage
+/coverage
+
+# Next.js Build Output
+.next/
+/out/
+/build
+
+# Environment Variables & Secrets
+.env*.local
+.env
+.env.production
+.env.staging
+!.env.example
+
+# Debug Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# TypeScript Cache
+*.tsbuildinfo
+next-env.d.ts
+
+# Inngest Local Dev Server State
+/.inngest
+
+# AI Tools & Harness Configs
+.agents
+.gemini
+.kilo
+AGENTS.md
+CLAUDE.md
+ecc.cmd
+ecc.ps1
+
+# Documentation & Planning
+docs/
+docs
+plan/
+plan

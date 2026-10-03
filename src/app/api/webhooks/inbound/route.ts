@@ -1,0 +1,122 @@
+import { NextRequest, NextResponse } from "next/server";
+import { LeadSchema } from "@/lib/db/validators";
+import { inngest } from "@/inngest/client";
+import { getPlaybookForIndustry } from "@/lib/services/playbook.service";
+import { createServerSupabaseClient } from "@/lib/db/client";
+import { env } from "@/lib/env";
+import { logger } from "@/lib/logger";
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+
+    if (!body.org_id) {
+      return NextResponse.json(
+        { success: false, error: "org_id is required" },
+        { status: 400 }
+      );
+    }
+
+    // In production, validate UUID format
+    if (env.isProduction && !UUID_REGEX.test(body.org_id)) {
+      return NextResponse.json(
+        { success: false, error: "Invalid org_id: must be a valid UUID" },
+        { status: 400 }
+      );
+    }
+
+    const orgId = body.org_id;
+    const leadData = body.lead || body;
+
+    const parsedLead = LeadSchema.safeParse({
+      org_id: orgId,
+      name: leadData.name || null,
+      email: leadData.email || null,
+      phone: leadData.phone || null,
+      source: "webhook",
+      status: "new_lead",
+      detected_service: leadData.service || leadData.detected_service || "General Inquiry",
+      detected_urgency: leadData.urgency || "medium",
+      sentiment: "neutral",
+      requires_approval: !!body.requires_approval,
+    });
+
+    if (!parsedLead.success) {
+      return NextResponse.json(
+        { success: false, error: "Invalid lead payload", details: parsedLead.error.format() },
+        { status: 400 }
+      );
+    }
+
+    const leadId = `lead_${Date.now()}`;
+    const playbook = getPlaybookForIndustry(body.industry || "general");
+
+    if (env.isSupabaseLive) {
+      try {
+        const supabase = createServerSupabaseClient();
+        const { error: insertErr } = await supabase.from("leads").insert({
+          id: leadId,
+          org_id: parsedLead.data.org_id,
+          name: parsedLead.data.name,
+          email: parsedLead.data.email,
+          phone: parsedLead.data.phone,
+          source: parsedLead.data.source,
+          status: parsedLead.data.status,
+          detected_service: parsedLead.data.detected_service,
+          detected_urgency: parsedLead.data.detected_urgency,
+          sentiment: parsedLead.data.sentiment,
+          requires_approval: parsedLead.data.requires_approval,
+          approval_pending: parsedLead.data.requires_approval,
+          created_at: new Date().toISOString(),
+        });
+
+        if (insertErr) {
+          logger.error("Failed to insert inbound lead into database", {
+            service: "InboundWebhook",
+            orgId,
+            error: insertErr.message,
+          });
+        }
+      } catch (dbErr: any) {
+        logger.error("Database connection error during inbound lead insert", {
+          service: "InboundWebhook",
+          orgId,
+          error: dbErr.message,
+        });
+      }
+    }
+
+    // Trigger Inngest durable sequence
+    try {
+      await inngest.send({
+        name: "app/lead.detected",
+        data: {
+          lead_id: leadId,
+          org_id: parsedLead.data.org_id,
+          service: parsedLead.data.detected_service,
+          requires_approval: parsedLead.data.requires_approval,
+          playbook_steps: playbook.steps,
+        },
+      });
+    } catch (inngestErr: any) {
+      logger.warn("Inngest dispatch warning on inbound lead", {
+        service: "InboundWebhook",
+        leadId,
+        error: inngestErr?.message,
+      });
+    }
+
+    return NextResponse.json(
+      { success: true, lead_id: leadId, status: "enrolled" },
+      { status: 201 }
+    );
+  } catch (error: any) {
+    logger.error("Error handling inbound webhook", {
+      service: "InboundWebhook",
+      error: error.message,
+    });
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
