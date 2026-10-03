@@ -177,6 +177,16 @@ function LoginForm() {
           <ShieldCheck className="h-4 w-4 text-emerald-600" />
           <span>NIST SP 800-57 & FIPS 140-3 KMS Envelope Encrypted</span>
         </div>
+
+        <div className="mt-4 flex items-center justify-center gap-4 text-xs text-slate-400">
+          <Link href="/terms" className="hover:text-slate-600 transition-colors">
+            Terms of Service
+          </Link>
+          <span>&bull;</span>
+          <Link href="/privacy" className="hover:text-slate-600 transition-colors">
+            Privacy Policy
+          </Link>
+        </div>
       </div>
     </div>
   );
