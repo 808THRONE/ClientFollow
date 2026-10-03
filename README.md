@@ -46,8 +46,8 @@ Ensure you have the following installed:
 Clone the repository and install dependencies:
 
 ```bash
-git clone <your-repo-url>
-cd SAAS
+git clone https://github.com/808THRONE/ClientFollow.git
+cd ClientFollow
 npm install
 ```
 
@@ -147,4 +147,4 @@ npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
 
 ## License
 
-Private and proprietary. All rights reserved.
+Distributed under the [MIT License](LICENSE). See `LICENSE` for more information.
