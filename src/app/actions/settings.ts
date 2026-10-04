@@ -42,15 +42,16 @@ export async function saveNotificationSettingsAction(
       success: true,
       message: "Notification preferences updated successfully!",
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     logger.error("Failed to save notification settings", {
       service: "Settings",
       orgId,
-      error: err.message,
+      error: msg,
     });
     return {
       success: false,
-      message: `Failed to save preferences: ${err.message}`,
+      message: `Failed to save preferences: ${msg}`,
     };
   }
 }

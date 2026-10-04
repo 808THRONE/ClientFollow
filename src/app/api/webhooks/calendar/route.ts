@@ -5,6 +5,14 @@ import { createServerSupabaseClient } from "@/lib/db/client";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
+interface LeadLookupCandidate {
+  id: string;
+  email: string | null;
+  phone: string | null;
+  org_id: string;
+  status: string;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const payload = await req.json();
@@ -12,7 +20,7 @@ export async function POST(req: NextRequest) {
     const attendeeEmail = (payload?.invitee?.email || payload?.attendee?.email || "").trim().toLowerCase();
     const attendeePhone = (payload?.invitee?.phone || payload?.attendee?.phone || "").trim();
 
-    let activeLeads: any[] = [];
+    let activeLeads: LeadLookupCandidate[] = [];
     if (env.isSupabaseLive) {
       try {
         const supabase = createServerSupabaseClient();
@@ -31,12 +39,12 @@ export async function POST(req: NextRequest) {
         const { data, error } = await query.limit(5);
 
         if (!error && Array.isArray(data)) {
-          activeLeads = data;
+          activeLeads = data as LeadLookupCandidate[];
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         logger.warn("Calendar webhook database lookup warning", {
           service: "CalendarWebhook",
-          error: err?.message,
+          error: err instanceof Error ? err.message : String(err),
         });
       }
     }
@@ -52,11 +60,11 @@ export async function POST(req: NextRequest) {
             .update({ status: "booked", updated_at: new Date().toISOString() })
             .eq("id", result.matchedLeadId)
             .neq("status", "booked");
-        } catch (err: any) {
+        } catch (err: unknown) {
           logger.warn("Failed to update lead status to booked in database", {
             service: "CalendarWebhook",
             leadId: result.matchedLeadId,
-            error: err?.message,
+            error: err instanceof Error ? err.message : String(err),
           });
         }
       }
@@ -66,10 +74,10 @@ export async function POST(req: NextRequest) {
           name: result.inngestEvent.name,
           data: result.inngestEvent.data,
         });
-      } catch (inngestErr: any) {
+      } catch (inngestErr: unknown) {
         logger.warn("Inngest dispatch warning on calendar booking", {
           service: "CalendarWebhook",
-          error: inngestErr?.message,
+          error: inngestErr instanceof Error ? inngestErr.message : String(inngestErr),
         });
       }
 
@@ -92,11 +100,12 @@ export async function POST(req: NextRequest) {
       matched: false,
       message: "Booking received but no matching active lead found",
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : "Internal error";
     logger.error("Error processing booking webhook", {
       service: "CalendarWebhook",
-      error: error.message,
+      error: errorMsg,
     });
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }

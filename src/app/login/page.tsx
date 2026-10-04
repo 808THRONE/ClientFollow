@@ -52,8 +52,9 @@ function LoginForm() {
       }
 
       await setSessionAndRedirect(email, returnTo);
-    } catch (err: any) {
-      setError(err?.message || "Failed to sign in");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to sign in";
+      setError(msg);
       setIsLoading(false);
     }
   };
@@ -166,7 +167,7 @@ function LoginForm() {
           </div>
 
           <div className="pt-2 text-center text-xs text-slate-500">
-            Don't have an account yet?{" "}
+            Don&apos;t have an account yet?{" "}
             <Link href="/signup" className="font-semibold text-blue-600 hover:text-blue-700">
               Start 14-day free trial
             </Link>

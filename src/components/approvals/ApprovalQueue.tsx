@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { Lead } from "@/lib/db/types";
 import { approveLeadSequence, rejectLeadSequence } from "@/app/actions/approval";
+import { filterPendingApprovals } from "@/lib/services/approval.service";
 
 interface ApprovalQueueProps {
   initialLeads: Lead[];
@@ -27,9 +28,7 @@ export function ApprovalQueue({ initialLeads }: ApprovalQueueProps) {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
-  const pendingLeads = leads.filter(
-    (l) => l.requires_approval && l.status !== "lost"
-  );
+  const pendingLeads = filterPendingApprovals(leads);
 
   const getDefaultMessage = (lead: Lead) => {
     return (
@@ -225,7 +224,7 @@ export function ApprovalQueue({ initialLeads }: ApprovalQueueProps) {
                         </div>
                       ) : (
                         <p className="text-sm text-slate-800 whitespace-pre-wrap leading-relaxed">
-                          "{message}"
+                          &ldquo;{message}&rdquo;
                         </p>
                       )}
                     </div>

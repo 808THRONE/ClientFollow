@@ -127,7 +127,7 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
                 <span>Follow-Up Draft Pending Approval</span>
               </div>
               <p className="text-xs text-slate-700 italic bg-white p-3 rounded-lg border border-amber-100 leading-relaxed">
-                "Hi {lead.name?.split(" ")[0] || "there"}, following up on your inquiry about {lead.detected_service || "our services"}. We have open slots this week if you'd like to schedule a quick consultation."
+                &ldquo;Hi {lead.name?.split(" ")[0] || "there"}, following up on your inquiry about {lead.detected_service || "our services"}. We have open slots this week if you&apos;d like to schedule a quick consultation.&rdquo;
               </p>
               <div className="flex gap-2">
                 <button

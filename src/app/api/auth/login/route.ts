@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { signToken } from "@/lib/session-utils";
+import { signToken, SESSION_COOKIE, getSessionCookieOptions } from "@/lib/session-utils";
 import { createServerSupabaseClient } from "@/lib/db/client";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import { checkRateLimit, resetRateLimit } from "@/lib/rate-limit";
-
-const SESSION_COOKIE = "cf_session";
-const SESSION_MAX_AGE = 60 * 60 * 24; // 24 hours (reduced from 7 days for session hygiene)
 
 // Rate limit: 5 login attempts per 15 minutes per IP
 const LOGIN_RATE_LIMIT_OPTIONS = {
@@ -106,21 +103,19 @@ export async function POST(req: NextRequest) {
       data: { email, orgId },
     });
 
-    response.cookies.set(SESSION_COOKIE, token, {
-      httpOnly: true,
-      secure: env.isProduction,
-      sameSite: "lax",
-      maxAge: SESSION_MAX_AGE,
-      path: "/",
-    });
+    response.cookies.set(SESSION_COOKIE, token, getSessionCookieOptions());
 
     return response;
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : "Internal login error";
     logger.error("Unexpected error in login handler", {
       service: "AuthLogin",
-      error: err.message,
+      error: errorMsg,
     });
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: env.isProduction ? "Authentication failed" : errorMsg },
+      { status: 500 }
+    );
   }
 }
 

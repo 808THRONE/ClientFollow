@@ -41,17 +41,18 @@ export async function updateLeadStatusAction(
     try {
       const leadsRepo = getLeadsRepo();
       await leadsRepo.updateLeadStatus(leadId, orgId, targetStatus);
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
       logger.error("Failed to update lead status", {
         service: "LeadsAction",
         leadId,
         orgId,
         targetStatus,
-        error: err?.message,
+        error: msg,
       });
       return {
         success: false,
-        error: `Database update failed: ${err?.message || "Unknown error"}`,
+        error: `Database update failed: ${msg}`,
       };
     }
   }
@@ -77,9 +78,10 @@ export async function getLeadsAction(
       const leadsRepo = getLeadsRepo();
       const leads = await leadsRepo.getLeadsByOrg(orgId);
       return { success: true, leads };
-    } catch (err: any) {
-      logger.error("Failed to fetch leads", { service: "LeadsAction", orgId, error: err.message });
-      return { success: false, leads: [], error: err.message };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("Failed to fetch leads", { service: "LeadsAction", orgId, error: msg });
+      return { success: false, leads: [], error: msg };
     }
   }
 
@@ -135,9 +137,10 @@ export async function createLeadAction(
     });
 
     return { success: true, lead: created };
-  } catch (err: any) {
-    logger.error("Failed to create lead", { service: "LeadsAction", error: err.message });
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("Failed to create lead", { service: "LeadsAction", error: msg });
+    return { success: false, error: msg };
   }
 }
 
@@ -163,9 +166,10 @@ export async function approveDraftAction(
     });
 
     return { success: true };
-  } catch (error: any) {
-    logger.error("Failed to approve draft", { service: "LeadsAction", leadId, error: error.message });
-    return { success: false, error: error.message };
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    logger.error("Failed to approve draft", { service: "LeadsAction", leadId, error: msg });
+    return { success: false, error: msg };
   }
 }
 
@@ -208,14 +212,15 @@ export async function enrollScannedLeadsAction(
           created_at: new Date(),
         });
         createdLeads.push(created);
-      } catch (dbErr: any) {
+      } catch (dbErr: unknown) {
+        const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
         logger.error("Failed to create scanned lead in database", {
           service: "LeadsAction",
           leadId,
           orgId,
-          error: dbErr.message,
+          error: msg,
         });
-        errors.push(`Lead ${leadId}: ${dbErr.message}`);
+        errors.push(`Lead ${leadId}: ${msg}`);
         continue; // Skip Inngest dispatch if DB insert failed
       }
     } else {
@@ -246,11 +251,12 @@ export async function enrollScannedLeadsAction(
           playbook_steps: playbook.steps,
         },
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
       logger.warn("Inngest dispatch failed for scanned lead", {
         service: "LeadsAction",
         leadId,
-        error: e.message,
+        error: msg,
       });
       // Non-fatal: lead was created in DB, workflow will need manual trigger
     }
@@ -281,9 +287,10 @@ export async function deleteLeadAction(
     try {
       const leadsRepo = getLeadsRepo();
       await leadsRepo.deleteLead(leadId, orgId);
-    } catch (err: any) {
-      logger.error("Failed to delete lead", { service: "LeadsAction", leadId, orgId, error: err.message });
-      return { success: false, error: err.message };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("Failed to delete lead", { service: "LeadsAction", leadId, orgId, error: msg });
+      return { success: false, error: msg };
     }
   }
 
@@ -311,8 +318,9 @@ export async function resendFollowUpAction(
       },
     });
     return { success: true };
-  } catch (err: any) {
-    logger.error("Failed to resend follow-up", { service: "LeadsAction", leadId, error: err.message });
-    return { success: false, error: err.message };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("Failed to resend follow-up", { service: "LeadsAction", leadId, error: msg });
+    return { success: false, error: msg };
   }
 }

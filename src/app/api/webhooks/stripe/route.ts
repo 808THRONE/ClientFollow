@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type Stripe from "stripe";
 import { processStripeWebhookEvent, verifyStripeWebhookSignature } from "@/lib/services/stripe.service";
 import { createServerSupabaseClient } from "@/lib/db/client";
 import { env } from "@/lib/env";
@@ -10,14 +11,15 @@ export async function POST(req: NextRequest) {
     const signature = req.headers.get("stripe-signature");
     const webhookSecret = env.STRIPE_WEBHOOK_SECRET;
 
-    let event: any;
+    let event: Stripe.Event;
     if (signature && webhookSecret) {
       try {
         event = verifyStripeWebhookSignature(rawBody, signature, webhookSecret);
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const errorMsg = err instanceof Error ? err.message : "Signature verification failed";
         logger.warn("Stripe webhook signature verification failed", {
           service: "StripeWebhook",
-          error: err.message,
+          error: errorMsg,
         });
         return NextResponse.json(
           { success: false, error: "Invalid webhook signature" },
@@ -34,7 +36,7 @@ export async function POST(req: NextRequest) {
       );
     } else {
       // Development mock fallback
-      event = JSON.parse(rawBody || "{}");
+      event = JSON.parse(rawBody || "{}") as Stripe.Event;
     }
 
     // Process mapped event results
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
       if (env.isSupabaseLive) {
         try {
           const supabase = createServerSupabaseClient();
-          const updateData: any = {
+          const updateData: Record<string, unknown> = {
             subscription_status: result.subscriptionStatus,
             updated_at: new Date().toISOString(),
           };
@@ -70,14 +72,15 @@ export async function POST(req: NextRequest) {
           if (dbErr) {
             throw new Error(`Database error updating organization tier: ${dbErr.message}`);
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const errorMsg = err instanceof Error ? err.message : "Database update failed";
           logger.error("Failed to update organization from Stripe webhook", {
             service: "StripeWebhook",
             orgId: result.orgId,
-            error: err.message,
+            error: errorMsg,
           });
           return NextResponse.json(
-            { success: false, error: err.message },
+            { success: false, error: errorMsg },
             { status: 500 }
           );
         }
@@ -97,11 +100,12 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, received: true, unhandledType: event?.type });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : "Internal server error";
     logger.error("Error processing Stripe webhook event", {
       service: "StripeWebhook",
-      error: error.message,
+      error: errorMsg,
     });
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }

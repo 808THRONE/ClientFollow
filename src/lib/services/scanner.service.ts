@@ -84,25 +84,34 @@ export function scanHistoricalThreads(params: {
   messages: RawHistoricalMessage[];
   industry: string;
 }): ScannedLeadResult[] {
-  const industry = params.industry.toLowerCase();
+  if (!params || !Array.isArray(params.messages)) {
+    return [];
+  }
+
+  const industry = (params.industry || "general").toLowerCase();
   const benchmarkConfig = INDUSTRY_DEAL_BENCHMARKS[industry] || { default: 1000, keywords: {} };
+  const keywords = benchmarkConfig.keywords || {};
   const playbook = getPlaybookForIndustry(industry);
   const template = playbook.steps[0]?.template_name || "direct_touch";
 
   const leads: ScannedLeadResult[] = [];
 
   for (const msg of params.messages) {
+    if (!msg) continue;
+
     // 1. Drop noise (receipts, noreply, newsletters)
     if (isHeuristicNoise(msg)) {
       continue;
     }
 
     // 2. Identify service & estimated value
-    const textToAnalyze = `${msg.subject} ${msg.body}`.toLowerCase();
+    const subject = typeof msg.subject === "string" ? msg.subject : "";
+    const body = typeof msg.body === "string" ? msg.body : "";
+    const textToAnalyze = `${subject} ${body}`.toLowerCase();
     let estimatedValue = benchmarkConfig.default;
     let detectedService = "General Service Consultation";
 
-    for (const [kw, value] of Object.entries(benchmarkConfig.keywords)) {
+    for (const [kw, value] of Object.entries(keywords)) {
       if (textToAnalyze.includes(kw)) {
         estimatedValue = value;
         detectedService = kw.charAt(0).toUpperCase() + kw.slice(1);
@@ -111,7 +120,10 @@ export function scanHistoricalThreads(params: {
     }
 
     // 3. Extract sender name approximation
-    const nameMatch = msg.sender.split("@")[0].replace(/[._-]/g, " ");
+    const sender = typeof msg.sender === "string" ? msg.sender : "Valued Prospect";
+    const nameMatch = sender.includes("@")
+      ? sender.split("@")[0].replace(/[._-]/g, " ")
+      : sender.replace(/[._-]/g, " ");
     const firstName = nameMatch.charAt(0).toUpperCase() + nameMatch.slice(1);
 
     // 4. Formulate suggested first touch
@@ -121,14 +133,14 @@ export function scanHistoricalThreads(params: {
     );
 
     leads.push({
-      id: msg.id,
-      sender: msg.sender,
-      subject: msg.subject,
-      snippet: msg.body.slice(0, 150),
+      id: msg.id || `lead_${Date.now()}`,
+      sender,
+      subject,
+      snippet: body.slice(0, 150),
       detectedService,
       estimatedValue,
       isUnanswered: true,
-      receivedAt: msg.receivedAt,
+      receivedAt: msg.receivedAt || new Date(),
       suggestedFirstTouch: suggestedTouch,
     });
   }

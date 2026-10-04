@@ -2,6 +2,7 @@ import { inngest } from "@/inngest/client";
 import { createServerSupabaseClient } from "@/lib/db/client";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { PlaybookStep } from "@/lib/db/types";
 
 export interface CadenceExecutionStep {
   stepNumber: number;
@@ -19,21 +20,33 @@ export interface FollowUpPlan {
   approvalEventWait?: string;
 }
 
+export interface RawPlaybookStepInput {
+  step_number?: number;
+  stepNumber?: number;
+  delay_hours?: number;
+  delayHours?: number;
+  channel?: "gmail" | "whatsapp" | "sms" | string;
+  template_name?: string;
+  templateName?: string;
+  prompt_override?: string;
+  promptOverride?: string;
+}
+
 /**
  * Transforms raw playbook input into an executable follow-up sequence plan.
  */
 export function createFollowUpPlan(params: {
   leadId: string;
   orgId: string;
-  playbookSteps: any[];
+  playbookSteps: Array<RawPlaybookStepInput>;
   requiresApproval: boolean;
 }): FollowUpPlan {
   const steps: CadenceExecutionStep[] = params.playbookSteps.map((s) => ({
-    stepNumber: s.step_number,
-    delayHours: s.delay_hours,
-    channel: s.channel,
-    templateName: s.template_name,
-    promptOverride: s.prompt_override,
+    stepNumber: Number(s.step_number || s.stepNumber || 1),
+    delayHours: Number(s.delay_hours ?? s.delayHours ?? 0),
+    channel: (s.channel === "whatsapp" || s.channel === "sms" ? s.channel : "gmail"),
+    templateName: String(s.template_name || s.templateName || "default_followup"),
+    promptOverride: s.prompt_override || s.promptOverride,
   }));
 
   return {
@@ -92,11 +105,12 @@ export const followUpCadence = inngest.createFunction(
                 .from("leads")
                 .update({ approval_pending: false, updated_at: new Date().toISOString() })
                 .eq("id", lead_id);
-            } catch (err: any) {
+            } catch (err: unknown) {
+              const msg = err instanceof Error ? err.message : String(err);
               logger.warn("Failed to clear approval_pending flag in DB", {
                 service: "FollowUpCadence",
                 leadId: lead_id,
-                error: err.message,
+                error: msg,
               });
             }
           });
@@ -125,11 +139,12 @@ export const followUpCadence = inngest.createFunction(
             } else {
               leadStatus = data?.status || null;
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
             logger.error("Database connection failure checking lead status", {
               service: "FollowUpCadence",
               leadId: lead_id,
-              error: err.message,
+              error: msg,
             });
             throw err; // Fail step so Inngest retries
           }
@@ -167,11 +182,12 @@ export const followUpCadence = inngest.createFunction(
               });
               throw new Error(`Database error advancing lead status: ${updateErr.message}`);
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
             logger.error("Database error during status advancement", {
               service: "FollowUpCadence",
               leadId: lead_id,
-              error: err.message,
+              error: msg,
             });
             throw err; // Fail step so Inngest retries
           }
@@ -207,11 +223,12 @@ export const followUpCadence = inngest.createFunction(
             });
             throw new Error(`Database error marking lead as lost: ${error.message}`);
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
           logger.error("Database error marking lead as lost", {
             service: "FollowUpCadence",
             leadId: lead_id,
-            error: err.message,
+            error: msg,
           });
           throw err;
         }

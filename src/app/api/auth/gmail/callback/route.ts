@@ -46,10 +46,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(
       new URL(`${returnTarget}?connected=gmail`, baseUrl)
     );
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     logger.error("Failed to exchange code for tokens", {
       service: "GmailCallback",
-      error: err.message,
+      error: msg,
     });
 
     // Dev/Sandbox simulated success only if mock code was explicitly supplied

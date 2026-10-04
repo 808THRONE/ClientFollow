@@ -91,7 +91,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
     setIsEnrolling(true);
     try {
       await enrollScannedLeadsAction("org_demo", selectedIndustry, scannedLeads);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.warn("[OnboardingWizard] Enrollment notice:", e);
     } finally {
       if (onComplete) onComplete();
@@ -159,7 +159,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
               Select Your Service Industry
             </h2>
             <p className="text-sm text-gray-500 mt-1">
-              We'll auto-configure your follow-up sequence with pre-tuned delays and copy templates.
+              We&apos;ll auto-configure your follow-up sequence with pre-tuned delays and copy templates.
             </p>
           </div>
 
@@ -281,7 +281,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
               <div>
                 <h3 className="font-bold text-gray-900 text-base">Uncover Lost Pipeline Revenue</h3>
                 <p className="text-xs text-gray-500 max-w-md mx-auto mt-1">
-                  We'll inspect the last 7 days of incoming threads, filter out receipts and noise, and isolate leads needing follow-up.
+                  We&apos;ll inspect the last 7 days of incoming threads, filter out receipts and noise, and isolate leads needing follow-up.
                 </p>
               </div>
               <button
@@ -322,7 +322,7 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete }
                         </span>
                       </div>
                       <p className="text-xs text-gray-500 italic mt-1 max-w-lg truncate">
-                        "{lead.snippet}"
+                        &ldquo;{lead.snippet}&rdquo;
                       </p>
                       <div className="text-xs font-semibold text-emerald-700 mt-1">
                         Est. Deal Value: ${lead.estimatedValue.toLocaleString()}

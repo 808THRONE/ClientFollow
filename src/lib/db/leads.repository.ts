@@ -154,12 +154,12 @@ export class LeadsRepository {
   /**
    * Maps raw PostgreSQL/Supabase snake_case fields to domain Lead model.
    */
-  private mapDatabaseRowToLead(row: any): Lead {
+  private mapDatabaseRowToLead(row: Record<string, unknown>): Lead {
     return {
-      ...row,
-      created_at: row.created_at ? new Date(row.created_at) : undefined,
-      updated_at: row.updated_at ? new Date(row.updated_at) : undefined,
-      last_interaction_at: row.last_interaction_at ? new Date(row.last_interaction_at) : undefined,
+      ...(row as unknown as Lead),
+      created_at: row.created_at ? new Date(String(row.created_at)) : undefined,
+      updated_at: row.updated_at ? new Date(String(row.updated_at)) : undefined,
+      last_interaction_at: row.last_interaction_at ? new Date(String(row.last_interaction_at)) : undefined,
     };
   }
 }

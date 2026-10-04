@@ -15,6 +15,8 @@ import { AppShell } from "@/components/layout/AppShell";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { DEMO_LEADS } from "@/lib/demo-data";
 import { Lead } from "@/lib/db/types";
+import { filterPendingApprovals } from "@/lib/services/approval.service";
+import { PipelineStatus } from "@/lib/services/pipeline-state.service";
 import {
   getLeadsAction,
   updateLeadStatusAction,
@@ -38,7 +40,7 @@ export default function DashboardPage() {
         if (isMounted && res.success && res.leads && res.leads.length > 0) {
           setLeads(res.leads);
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.warn("[DashboardPage] Offline fallback used:", err);
       }
     }
@@ -55,28 +57,30 @@ export default function DashboardPage() {
 
   const handleStatusChange = async (leadId: string, newStatus: string) => {
     const currentLead = leads.find((l) => l.id === leadId);
-    const oldStatus = currentLead?.status || "new_lead";
+    const oldStatus: PipelineStatus = (currentLead?.status as PipelineStatus) || "new_lead";
+    const targetStatus = newStatus as PipelineStatus;
 
     // Optimistic UI state mutation
     setLeads((prev) =>
-      prev.map((l) => (l.id === leadId ? { ...l, status: newStatus as any } : l))
+      prev.map((l) => (l.id === leadId ? { ...l, status: targetStatus } : l))
     );
     showNotification(`Lead moved to ${newStatus.replace("_", " ").toUpperCase()}`);
 
     try {
-      const res = await updateLeadStatusAction(leadId, newStatus as any, oldStatus as any, "org_apex_dental");
+      const res = await updateLeadStatusAction(leadId, targetStatus, oldStatus, "org_apex_dental");
       if (!res.success) {
         // Revert optimistic state
         setLeads((prev) =>
-          prev.map((l) => (l.id === leadId ? { ...l, status: oldStatus as any } : l))
+          prev.map((l) => (l.id === leadId ? { ...l, status: oldStatus } : l))
         );
         showNotification(`Failed to move lead: ${res.error}`);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setLeads((prev) =>
-        prev.map((l) => (l.id === leadId ? { ...l, status: oldStatus as any } : l))
+        prev.map((l) => (l.id === leadId ? { ...l, status: oldStatus } : l))
       );
-      console.warn(`[DashboardPage] Status action notice: ${err?.message || err}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[DashboardPage] Status action notice: ${msg}`);
     }
   };
 
@@ -93,8 +97,9 @@ export default function DashboardPage() {
 
     try {
       await approveDraftAction(leadId);
-    } catch (err: any) {
-      console.warn(`[DashboardPage] Approve action notice: ${err?.message || err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[DashboardPage] Approve action notice: ${msg}`);
     }
   };
 
@@ -108,8 +113,9 @@ export default function DashboardPage() {
         ...newLead,
         org_id: "org_apex_dental",
       });
-    } catch (err: any) {
-      console.warn(`[DashboardPage] Create lead action notice: ${err?.message || err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[DashboardPage] Create lead action notice: ${msg}`);
     }
   };
 
@@ -118,8 +124,9 @@ export default function DashboardPage() {
     showNotification("Lead removed from pipeline");
     try {
       await deleteLeadAction(leadId, "org_apex_dental");
-    } catch (err: any) {
-      console.warn(`[DashboardPage] Delete lead notice: ${err?.message || err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[DashboardPage] Delete lead notice: ${msg}`);
     }
   };
 
@@ -127,14 +134,13 @@ export default function DashboardPage() {
     showNotification("Follow-up touch queued for dispatch");
     try {
       await resendFollowUpAction(leadId, "org_apex_dental");
-    } catch (err: any) {
-      console.warn(`[DashboardPage] Resend notice: ${err?.message || err}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[DashboardPage] Resend notice: ${msg}`);
     }
   };
 
-  const pendingApprovals = leads.filter(
-    (l) => l.requires_approval && l.status !== "lost"
-  );
+  const pendingApprovals = filterPendingApprovals(leads);
 
   const filteredLeads = leads.filter((l) => {
     // Channel filter

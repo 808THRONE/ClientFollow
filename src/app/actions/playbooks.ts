@@ -60,16 +60,17 @@ export async function savePlaybookAction(input: SavePlaybookInput): Promise<{
       message: `Successfully saved ${input.steps.length}-touch cadence for ${input.industry}!`,
       savedSteps: input.steps,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     logger.error("Failed to save playbook cadence", {
       service: "PlaybooksAction",
       industry: input.industry,
-      error: err.message,
+      error: msg,
     });
     return {
       success: false,
       message: "Failed to save playbook cadence",
-      error: err.message,
+      error: msg,
     };
   }
 }

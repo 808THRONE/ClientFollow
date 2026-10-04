@@ -69,8 +69,9 @@ export function SettingsHub() {
       } else {
         setSimStatus(`HTTP ${res.status} — ${data.error || "Failed to trigger webhook"}`);
       }
-    } catch (e: any) {
-      setSimStatus(`Simulation Error: ${e.message}`);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setSimStatus(`Simulation Error: ${msg}`);
     } finally {
       setSimLoading(false);
     }
@@ -159,7 +160,7 @@ export function SettingsHub() {
             <div className="flex items-center justify-between p-4 bg-slate-50 border border-slate-200 rounded-xl">
               <div>
                 <p className="text-xs font-semibold text-slate-800">Email Notifications</p>
-                <p className="text-[11px] text-slate-500">Receive instant email digests when a lead transitions to 'Replied'</p>
+                <p className="text-[11px] text-slate-500">Receive instant email digests when a lead transitions to &apos;Replied&apos;</p>
               </div>
               <input
                 type="checkbox"

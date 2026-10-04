@@ -13,6 +13,7 @@ const PUBLIC_PATHS = [
   "/api/webhooks/calendar",
   "/api/webhooks/stripe",
   "/api/webhooks/inbound",
+  "/api/health",
   "/icon.svg",
   "/favicon.ico",
 ];
@@ -49,14 +50,14 @@ export interface TenantSession {
  * Resolves the active organization tenant context for an authenticated user.
  */
 export function resolveTenantSession(
-  user: any,
+  user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } | null | undefined,
   fallbackOrgIdHeader?: string | null
 ): TenantSession {
   if (!user || !user.id) {
     throw new Error("Cannot resolve tenant session for unauthenticated user");
   }
 
-  const metaOrgId = user.user_metadata?.org_id;
+  const metaOrgId = user.user_metadata?.org_id as string | undefined;
   const orgId = metaOrgId || fallbackOrgIdHeader || "org_default_trial";
   const role = user.user_metadata?.role === "admin" ? "admin" : "operator";
 

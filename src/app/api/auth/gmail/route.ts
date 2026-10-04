@@ -41,10 +41,11 @@ export async function GET(req: NextRequest) {
             last_synced_at: new Date().toISOString(),
           });
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         logger.warn("Gmail Auth Callback token exchange warning", {
           service: "GmailAuth",
-          error: err?.message,
+          error: msg,
         });
       }
     }

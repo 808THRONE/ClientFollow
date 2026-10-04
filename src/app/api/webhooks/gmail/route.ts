@@ -20,8 +20,9 @@ export async function POST(req: NextRequest) {
     // Dispatch durable Inngest event to fetch and analyze history diff
     try {
       await inngest.send(processed.inngestEvent);
-    } catch (inngestErr: any) {
-      console.warn(`[Gmail Webhook] Inngest dispatch note: ${inngestErr?.message || inngestErr}`);
+    } catch (inngestErr: unknown) {
+      const msg = inngestErr instanceof Error ? inngestErr.message : String(inngestErr);
+      console.warn(`[Gmail Webhook] Inngest dispatch note: ${msg}`);
     }
 
     return NextResponse.json({
@@ -30,9 +31,10 @@ export async function POST(req: NextRequest) {
       emailAddress: processed.emailAddress,
       historyId: processed.historyId,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json(
-      { error: error?.message || "Internal server error" },
+      { error: errorMsg },
       { status: 500 }
     );
   }

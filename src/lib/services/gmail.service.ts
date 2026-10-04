@@ -66,6 +66,7 @@ export async function exchangeGoogleAuthCode(
       redirect_uri: redirectUri,
       grant_type: "authorization_code",
     }).toString(),
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
@@ -104,6 +105,7 @@ export async function refreshGoogleAccessToken(
       client_secret: clientSecret,
       grant_type: "refresh_token",
     }).toString(),
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
@@ -150,7 +152,7 @@ export async function sendGmailMessage(
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 
-  const bodyPayload: any = { raw: rawMessage };
+  const bodyPayload: { raw: string; threadId?: string } = { raw: rawMessage };
   if (params.threadId) {
     bodyPayload.threadId = params.threadId;
   }
@@ -162,6 +164,7 @@ export async function sendGmailMessage(
       Authorization: `Bearer ${accessToken}`,
     },
     body: JSON.stringify(bodyPayload),
+    signal: AbortSignal.timeout(10000),
   });
 
   if (!response.ok) {
@@ -222,15 +225,27 @@ export interface ProcessedPubSubWebhook {
   };
 }
 
+export interface PubSubNotificationEnvelope {
+  message?: {
+    data?: string;
+    messageId?: string;
+    publishTime?: string;
+  };
+  subscription?: string;
+}
+
 /**
  * Validates and processes a Google Cloud Pub/Sub push notification envelope
  */
-export function processGmailPushWebhook(envelope: any): ProcessedPubSubWebhook | null {
+export function processGmailPushWebhook(
+  envelope: PubSubNotificationEnvelope | unknown
+): ProcessedPubSubWebhook | null {
   if (!envelope || typeof envelope !== "object") {
     return null;
   }
 
-  const messageData = envelope.message?.data;
+  const envObj = envelope as PubSubNotificationEnvelope;
+  const messageData = envObj.message?.data;
   if (!messageData || typeof messageData !== "string") {
     return null;
   }

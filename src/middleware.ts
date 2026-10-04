@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { env } from "@/lib/env";
+import { SESSION_COOKIE } from "@/lib/session-constants";
 
 /**
  * Paths that do NOT require authentication.
@@ -22,6 +23,7 @@ const PUBLIC_PATHS = [
   "/api/checkout",
   "/api/auth/session",
   "/api/auth/login",
+  "/api/health",
   "/icon.svg",
   "/favicon.ico",
 ];
@@ -39,16 +41,16 @@ function isPublicPath(pathname: string): boolean {
   return false;
 }
 
-const SESSION_COOKIE = "cf_session";
-
 /**
- * Attaches comprehensive production security headers to all HTTP responses (S7).
+ * Attaches comprehensive production security headers and correlation ID to all HTTP responses (S7).
  */
-function applySecurityHeaders(response: NextResponse): NextResponse {
+function applySecurityHeaders(response: NextResponse, correlationId: string): NextResponse {
   response.headers.set("X-Frame-Options", "DENY");
   response.headers.set("X-Content-Type-Options", "nosniff");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  response.headers.set("x-correlation-id", correlationId);
+  response.headers.set("x-request-id", correlationId);
 
   if (env.isProduction) {
     response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
@@ -112,10 +114,18 @@ async function verifySessionCookie(token: string): Promise<boolean> {
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+  const correlationId =
+    request.headers.get("x-correlation-id") ||
+    request.headers.get("x-request-id") ||
+    crypto.randomUUID();
+
+  // Forward correlation ID downstream in request headers
+  request.headers.set("x-correlation-id", correlationId);
+  request.headers.set("x-request-id", correlationId);
 
   // Always allow public paths through with security headers
   if (isPublicPath(pathname)) {
-    return applySecurityHeaders(NextResponse.next({ request }));
+    return applySecurityHeaders(NextResponse.next({ request }), correlationId);
   }
 
   // ── Check session cookie (works with or without live Supabase) ──
@@ -136,11 +146,11 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
+        setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            supabaseResponse.cookies.set(name, value, options as any)
           );
         },
       },
@@ -152,20 +162,20 @@ export async function middleware(request: NextRequest) {
     hasSupabaseSession = !!user;
 
     if (hasSupabaseSession) {
-      return applySecurityHeaders(supabaseResponse);
+      return applySecurityHeaders(supabaseResponse, correlationId);
     }
   }
 
   // ── Auth decision: allow if either session is valid ──
   if (hasValidSession || hasSupabaseSession) {
-    return applySecurityHeaders(NextResponse.next({ request }));
+    return applySecurityHeaders(NextResponse.next({ request }), correlationId);
   }
 
   // ── Not authenticated → redirect to login ──
   const url = request.nextUrl.clone();
   url.pathname = "/login";
   url.searchParams.set("returnTo", pathname);
-  return applySecurityHeaders(NextResponse.redirect(url));
+  return applySecurityHeaders(NextResponse.redirect(url), correlationId);
 }
 
 export const config = {

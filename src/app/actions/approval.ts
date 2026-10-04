@@ -1,7 +1,6 @@
 "use server";
 
 import { inngest } from "@/inngest/client";
-import { Lead } from "@/lib/db/types";
 
 export interface ApproveSequenceInput {
   leadId: string;
@@ -13,8 +12,6 @@ export interface RejectSequenceInput {
   leadId: string;
   reason?: string;
 }
-
-
 
 /**
  * Server Action: Approves a pending follow-up step and resumes the Inngest sequence
@@ -39,10 +36,11 @@ export async function approveLeadSequence(input: ApproveSequenceInput) {
       leadId: input.leadId,
       message: "Sequence step approved and dispatched",
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Failed to approve sequence";
     return {
       success: false,
-      error: error?.message || "Failed to approve sequence",
+      error: msg,
     };
   }
 }
@@ -69,10 +67,11 @@ export async function rejectLeadSequence(input: RejectSequenceInput) {
       leadId: input.leadId,
       message: "Sequence rejected and cancelled",
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : "Failed to reject sequence";
     return {
       success: false,
-      error: error?.message || "Failed to reject sequence",
+      error: msg,
     };
   }
 }

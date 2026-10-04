@@ -58,8 +58,9 @@ export default function SignupPage() {
       }
 
       await setSessionAndRedirect(email, "/onboarding");
-    } catch (err: any) {
-      setError(err?.message || "Failed to create account");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to create account";
+      setError(msg);
       setIsLoading(false);
     }
   };

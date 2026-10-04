@@ -24,15 +24,16 @@ export async function POST(req: NextRequest) {
         cancelUrl: `${appUrl}/settings?billing=canceled`,
         customerEmail: body.email,
       });
-    } catch (stripeErr: any) {
+    } catch (stripeErr: unknown) {
+      const stripeMsg = stripeErr instanceof Error ? stripeErr.message : String(stripeErr);
       if (env.isProduction) {
         logger.error("Failed to create live Stripe checkout session in production", {
           service: "StripeCheckout",
           orgId: body.orgId,
-          error: stripeErr.message,
+          error: stripeMsg,
         });
         return NextResponse.json(
-          { success: false, error: `Checkout error: ${stripeErr.message}` },
+          { success: false, error: `Checkout error: ${stripeMsg}` },
           { status: 500 }
         );
       }
@@ -40,7 +41,7 @@ export async function POST(req: NextRequest) {
       logger.warn("Providing test sandbox session in development", {
         service: "StripeCheckout",
         orgId: body.orgId,
-        error: stripeErr.message,
+        error: stripeMsg,
       });
       session = {
         sessionId: `cs_test_${Date.now()}`,
@@ -53,11 +54,12 @@ export async function POST(req: NextRequest) {
       sessionId: session.sessionId,
       url: session.url || `${appUrl}/settings?billing=success`,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : "Internal checkout error";
     logger.error("Unexpected checkout session error", {
       service: "StripeCheckout",
-      error: error.message,
+      error: errorMsg,
     });
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }

@@ -131,8 +131,9 @@ Analyze the inbound communication from a prospective customer and output a stric
         const errorText = await response.text();
         console.warn(`[AI Classifier] OpenAI API returned HTTP ${response.status}: ${errorText}. Using deterministic fallback.`);
       }
-    } catch (err: any) {
-      console.warn(`[AI Classifier] Network error during AI classification: ${err?.message || err}. Falling back to deterministic analysis.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[AI Classifier] Network error during AI classification: ${msg}. Falling back to deterministic analysis.`);
     }
   }
 

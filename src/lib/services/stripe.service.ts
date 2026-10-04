@@ -90,17 +90,21 @@ export function verifyStripeWebhookSignature(
   const stripe = stripeClient || getStripeClient();
   try {
     return stripe.webhooks.constructEvent(rawBody, signature, secret);
-  } catch (err: any) {
-    throw new Error(`Stripe webhook verification failed: ${err.message}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Stripe webhook verification failed: ${msg}`);
   }
 }
 
 /**
  * Parses Stripe webhook events and maps them to organization tier and status updates.
  */
-export function processStripeWebhookEvent(event: any): StripeWebhookResult {
-  const type = event?.type;
-  const obj = event?.data?.object;
+export function processStripeWebhookEvent(
+  event: Stripe.Event | { type?: string; data?: { object?: Record<string, unknown> } } | unknown
+): StripeWebhookResult {
+  const ev = event as { type?: string; data?: { object?: Record<string, unknown> } };
+  const type = ev?.type;
+  const obj = ev?.data?.object as Record<string, any> | undefined;
 
   switch (type) {
     case "checkout.session.completed": {

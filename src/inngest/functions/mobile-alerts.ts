@@ -135,10 +135,11 @@ export const dailyMorningDigestCron = inngest.createFunction(
           dispatchedCount,
           timestamp: new Date().toISOString(),
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
         logger.error("Error executing morning digest cron", {
           service: "DailyDigest",
-          error: err.message,
+          error: msg,
         });
         throw err;
       }

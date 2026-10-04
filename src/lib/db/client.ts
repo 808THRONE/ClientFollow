@@ -1,32 +1,51 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { env } from "@/lib/env";
 
+let cachedServerClient: SupabaseClient | null = null;
+let cachedBrowserClient: SupabaseClient | null = null;
+
 /**
- * Creates a Supabase client for SERVER-SIDE operations (API routes, server actions, Inngest functions).
- * Uses the service role key which bypasses RLS — caller code is responsible for tenant scoping.
- *
- * @returns A new SupabaseClient instance per call (no stale singleton in serverless).
+ * Retrieves or creates a cached Supabase client for SERVER-SIDE operations
+ * (API routes, server actions, Inngest functions).
+ * Uses connection pooling and avoids re-allocating fetch agents per request.
  */
 export function createServerSupabaseClient(): SupabaseClient {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+  if (cachedServerClient) {
+    return cachedServerClient;
+  }
+
+  cachedServerClient = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
+    db: {
+      schema: "public",
+    },
   });
+
+  return cachedServerClient;
 }
 
 /**
- * Creates a Supabase client for CLIENT-SIDE (browser) usage.
+ * Retrieves or creates a cached Supabase client for CLIENT-SIDE (browser) usage.
  * Uses the anon key — relies on RLS policies for tenant isolation.
- *
- * @returns A SupabaseClient configured for browser persistence.
  */
 export function createBrowserSupabaseClient(): SupabaseClient {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
+  if (typeof window !== "undefined" && cachedBrowserClient) {
+    return cachedBrowserClient;
+  }
+
+  const client = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
     },
   });
+
+  if (typeof window !== "undefined") {
+    cachedBrowserClient = client;
+  }
+
+  return client;
 }

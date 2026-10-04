@@ -45,20 +45,33 @@ export function isInside24HourWindow(lastInteractionAt: Date | null): boolean {
 }
 
 /**
- * Substitutes variables like {{1}}, {{2}}, {{3}} into templates.
+ * Substitutes variables into templates. Supports named placeholders (e.g. {{first_name}}, {{service}}, {{booking_link}})
+ * as well as legacy positional placeholders ({{1}}, {{2}}, {{3}}).
  */
 export function substituteTemplateVariables(
   templateText: string,
-  vars: { first_name?: string; service?: string; booking_link?: string; [key: string]: any }
+  vars: Record<string, string | number | undefined> & {
+    first_name?: string;
+    service?: string;
+    booking_link?: string;
+  }
 ): string {
-  const firstName = vars.first_name?.trim() ? vars.first_name.trim() : "there";
-  const service = vars.service || "our services";
-  const bookingLink = vars.booking_link || "";
+  const firstName = String(vars.first_name ?? "").trim() || "there";
+  const service = String(vars.service ?? "").trim() || "our services";
+  const bookingLink = String(vars.booking_link ?? "").trim();
 
-  return templateText
-    .replace(/\{\{1\}\}/g, firstName)
-    .replace(/\{\{2\}\}/g, service)
-    .replace(/\{\{3\}\}/g, bookingLink);
+  let result = templateText
+    .replace(/\{\{(?:1|first_name|name)\}\}/gi, firstName)
+    .replace(/\{\{(?:2|service)\}\}/gi, service)
+    .replace(/\{\{(?:3|booking_link)\}\}/gi, bookingLink);
+
+  for (const [key, val] of Object.entries(vars)) {
+    if (val !== undefined && val !== null) {
+      result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "gi"), String(val));
+    }
+  }
+
+  return result;
 }
 
 export class ChannelDispatcherService {

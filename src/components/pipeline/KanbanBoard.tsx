@@ -39,11 +39,12 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   const grouped = groupLeadsByColumn(leads);
 
   const handleMoveStage = (leadId: string, newStatus: string) => {
+    const validStatus = newStatus as Lead["status"];
     setLeads((prev) =>
-      prev.map((l) => (l.id === leadId ? { ...l, status: newStatus as any, approval_pending: false } : l))
+      prev.map((l) => (l.id === leadId ? { ...l, status: validStatus, approval_pending: false } : l))
     );
     if (selectedLead?.id === leadId) {
-      setSelectedLead((prev) => (prev ? { ...prev, status: newStatus as any, approval_pending: false } : null));
+      setSelectedLead((prev) => (prev ? { ...prev, status: validStatus, approval_pending: false } : null));
     }
     if (onStatusChange) onStatusChange(leadId, newStatus);
   };

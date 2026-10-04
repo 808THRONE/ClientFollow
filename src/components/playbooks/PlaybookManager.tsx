@@ -415,7 +415,7 @@ export function PlaybookManager() {
                       <Sparkles className="h-3 w-3 text-blue-500" /> AI Dynamic Generation Preview
                     </div>
                     <p className="text-sm text-slate-800 leading-relaxed whitespace-pre-wrap">
-                      "{sampleMsg}"
+                      &ldquo;{sampleMsg}&rdquo;
                     </p>
                   </div>
                 </div>

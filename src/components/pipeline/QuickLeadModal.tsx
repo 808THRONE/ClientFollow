@@ -196,7 +196,7 @@ export function QuickLeadModal({ isOpen, onClose, onAddLead }: QuickLeadModalPro
               </label>
               <select
                 value={urgency}
-                onChange={(e) => setUrgency(e.target.value as any)}
+                onChange={(e) => setUrgency(e.target.value as "high" | "medium" | "low")}
                 className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 bg-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 <option value="high">High (4h follow-up)</option>

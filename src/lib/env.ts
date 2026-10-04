@@ -78,6 +78,14 @@ export const env = {
     "arn:aws:kms:us-east-1:123456789012:key/dev-key"
   ),
 
+  /** True when AWS KMS is configured with real credentials (not dev placeholder) */
+  get isKmsLive(): boolean {
+    return (
+      this.AWS_ACCESS_KEY_ID !== "dev-access-key" &&
+      !this.KMS_MASTER_KEY_ID.includes("dev-key")
+    );
+  },
+
   // ─── Inngest ──────────────────────────────────────────────────────────────
   INNGEST_EVENT_KEY: optionalEnv("INNGEST_EVENT_KEY"),
   INNGEST_SIGNING_KEY: optionalEnv("INNGEST_SIGNING_KEY"),

@@ -115,11 +115,11 @@ export async function POST(req: NextRequest) {
               .update({ status: "replied", updated_at: new Date().toISOString() })
               .eq("id", matchedLead.id);
           }
-        } catch (dbErr: any) {
+        } catch (dbErr: unknown) {
           logger.warn("Database lookup error during WhatsApp sender verification", {
             service: "WhatsAppWebhook",
             fromPhone,
-            error: dbErr.message,
+            error: dbErr instanceof Error ? dbErr.message : String(dbErr),
           });
         }
       } else {
@@ -140,10 +140,10 @@ export async function POST(req: NextRequest) {
               sentiment: "neutral",
             },
           });
-        } catch (inngestErr: any) {
+        } catch (inngestErr: unknown) {
           logger.warn("Inngest dispatch warning on WhatsApp message", {
             service: "WhatsAppWebhook",
-            error: inngestErr.message,
+            error: inngestErr instanceof Error ? inngestErr.message : String(inngestErr),
           });
         }
 
@@ -164,11 +164,12 @@ export async function POST(req: NextRequest) {
     }
 
     return NextResponse.json({ success: true, status: "ignored_non_message_event" });
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : "Internal error";
     logger.error("Error processing WhatsApp webhook payload", {
       service: "WhatsAppWebhook",
-      error: error.message,
+      error: errorMsg,
     });
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }

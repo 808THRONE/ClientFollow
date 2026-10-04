@@ -1,6 +1,8 @@
 import crypto from "crypto";
 import { env } from "@/lib/env";
 
+export { SESSION_COOKIE, SESSION_MAX_AGE, getSessionCookieOptions } from "./session-constants";
+
 /**
  * Creates a signed session token for the authenticated user.
  * HMAC-signed cookie — works without live Supabase.
@@ -28,3 +30,4 @@ export function verifyToken(token: string): Record<string, string> | null {
     return null;
   }
 }
+

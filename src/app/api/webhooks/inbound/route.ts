@@ -107,11 +107,11 @@ export async function POST(req: NextRequest) {
             error: insertErr.message,
           });
         }
-      } catch (dbErr: any) {
+      } catch (dbErr: unknown) {
         logger.error("Database connection error during inbound lead insert", {
           service: "InboundWebhook",
           orgId,
-          error: dbErr.message,
+          error: dbErr instanceof Error ? dbErr.message : String(dbErr),
         });
       }
     }
@@ -128,11 +128,11 @@ export async function POST(req: NextRequest) {
           playbook_steps: playbook.steps,
         },
       });
-    } catch (inngestErr: any) {
+    } catch (inngestErr: unknown) {
       logger.warn("Inngest dispatch warning on inbound lead", {
         service: "InboundWebhook",
         leadId,
-        error: inngestErr?.message,
+        error: inngestErr instanceof Error ? inngestErr.message : String(inngestErr),
       });
     }
 
@@ -140,11 +140,12 @@ export async function POST(req: NextRequest) {
       { success: true, lead_id: leadId, status: "enrolled" },
       { status: 201 }
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : "Internal error";
     logger.error("Error handling inbound webhook", {
       service: "InboundWebhook",
-      error: error.message,
+      error: errorMsg,
     });
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: errorMsg }, { status: 500 });
   }
 }
