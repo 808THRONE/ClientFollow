@@ -111,3 +111,63 @@ export const SequencePlaybookSchema = z.object({
   created_at: z.date().optional(),
   updated_at: z.date().optional(),
 });
+
+/**
+ * Validates that an email is structurally valid, contains a legitimate domain,
+ * and rejects single-letter dummy formats such as a@a.com.
+ */
+export function validateBusinessEmail(email: string): { valid: boolean; error?: string } {
+  if (!email || typeof email !== "string") {
+    return { valid: false, error: "Work email address is required." };
+  }
+
+  const trimmed = email.trim().toLowerCase();
+  const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!EMAIL_REGEX.test(trimmed) || trimmed.includes("..")) {
+    return { valid: false, error: "Please enter a valid email address (e.g., doctor@apexsmiles.com)." };
+  }
+
+  const [localPart, domainPart] = trimmed.split("@");
+  if (!localPart || !domainPart) {
+    return { valid: false, error: "Please enter a valid email address." };
+  }
+
+  // Reject dummy formats like a@a.com or single-character placeholders
+  if (localPart === "a" || domainPart.startsWith("a.") || trimmed === "a@a.com") {
+    return { valid: false, error: "Invalid dummy email address. Please provide a real business email." };
+  }
+
+  if (localPart.length < 2) {
+    return { valid: false, error: "Email prefix before '@' must be at least 2 characters." };
+  }
+
+  const parts = domainPart.split(".");
+  const domainLabel = parts[0];
+  const tld = parts[parts.length - 1];
+
+  if (!domainLabel || domainLabel.length < 2) {
+    return { valid: false, error: "Domain name must be at least 2 characters (e.g., apexsmiles.com, not a.com)." };
+  }
+
+  if (!tld || tld.length < 2 || !/^[a-zA-Z]+$/.test(tld)) {
+    return { valid: false, error: "Please enter a valid top-level domain (e.g., .com, .org, .io)." };
+  }
+
+  return { valid: true };
+}
+
+export const SignupRequestSchema = z.object({
+  businessName: z.string().trim().min(2, "Business or clinic name must be at least 2 characters"),
+  industry: IndustryEnum.default("dentist"),
+  email: z.string().trim().superRefine((val, ctx) => {
+    const result = validateBusinessEmail(val);
+    if (!result.valid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: result.error || "Invalid business email format",
+      });
+    }
+  }),
+  password: z.string().min(8, "Password must be at least 8 characters long"),
+});
+

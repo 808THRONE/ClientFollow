@@ -2,13 +2,10 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Zap, ShieldCheck, Mail, Lock, Building, ArrowRight, AlertCircle, CheckCircle2 } from "lucide-react";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { Zap, ShieldCheck, Mail, Lock, Building, ArrowRight, AlertCircle, Loader2 } from "lucide-react";
+import { validateBusinessEmail } from "@/lib/db/validators";
 
 export default function SignupPage() {
-  const router = useRouter();
-
   const [businessName, setBusinessName] = useState("");
   const [industry, setIndustry] = useState("dentist");
   const [email, setEmail] = useState("");
@@ -16,50 +13,53 @@ export default function SignupPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const setSessionAndRedirect = async (targetEmail: string, redirectTo: string) => {
-    await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: targetEmail, orgId: "org_demo" }),
-    });
-    window.location.href = redirectTo;
-  };
-
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
     setError(null);
 
-    const isDemoEmail = email.includes("demo") || email.includes("test");
-
-    // Demo/test accounts: skip Supabase entirely
-    if (isDemoEmail) {
-      await setSessionAndRedirect(email, "/onboarding");
+    // 1. Client-side input validation
+    if (!businessName.trim() || businessName.trim().length < 2) {
+      setError("Please enter a business or practice name (at least 2 characters).");
       return;
     }
 
+    const emailCheck = validateBusinessEmail(email);
+    if (!emailCheck.valid) {
+      setError(emailCheck.error || "Please enter a valid work email address.");
+      return;
+    }
+
+    if (!password || password.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+
+    setIsLoading(true);
+
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            organization_name: businessName,
-            industry,
-          },
-        },
+      const response = await fetch("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          businessName: businessName.trim(),
+          industry,
+          email: email.trim().toLowerCase(),
+          password,
+        }),
       });
 
-      if (authError) {
-        setError(authError.message);
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        setError(data.error || "Failed to create account. Please try again.");
         setIsLoading(false);
         return;
       }
 
-      await setSessionAndRedirect(email, "/onboarding");
+      // Seamless redirect with session cookie applied
+      window.location.href = data.redirectUrl || "/onboarding";
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to create account";
+      const msg = err instanceof Error ? err.message : "Failed to connect to authentication server";
       setError(msg);
       setIsLoading(false);
     }
@@ -84,8 +84,8 @@ export default function SignupPage() {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4 sm:px-0">
         <div className="bg-white py-8 px-6 shadow-xl border border-slate-200/80 rounded-2xl sm:px-10 space-y-6">
           {error && (
-            <div className="rounded-xl bg-rose-50 border border-rose-200 p-3.5 text-xs text-rose-700 flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600" />
+            <div className="rounded-xl bg-rose-50 border border-rose-200 p-3.5 text-xs text-rose-700 flex items-start gap-2.5 animate-in fade-in duration-150">
+              <AlertCircle className="h-4 w-4 flex-shrink-0 text-rose-600 mt-0.5" />
               <span>{error}</span>
             </div>
           )}
@@ -140,10 +140,13 @@ export default function SignupPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="owner@apexsmiles.com"
+                  placeholder="doctor@apexsmiles.com"
                   className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors"
                 />
               </div>
+              <p className="mt-1 text-[11px] text-slate-400">
+                Must be a valid business domain (e.g. name@company.com).
+              </p>
             </div>
 
             <div>
@@ -171,8 +174,17 @@ export default function SignupPage() {
               disabled={isLoading}
               className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg shadow-sm transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70"
             >
-              {isLoading ? "Setting up workspace..." : "Start Free Trial → Onboarding"}
-              <ArrowRight className="h-4 w-4" />
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Setting up workspace...
+                </>
+              ) : (
+                <>
+                  Start Free Trial → Onboarding
+                  <ArrowRight className="h-4 w-4" />
+                </>
+              )}
             </button>
           </form>
 

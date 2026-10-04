@@ -22,6 +22,7 @@ const PUBLIC_PATHS = [
   "/api/webhooks/inbound",
   "/api/auth/session",
   "/api/auth/login",
+  "/api/auth/signup",
   "/api/health",
   "/icon.svg",
   "/favicon.ico",
