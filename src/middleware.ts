@@ -32,8 +32,7 @@ function isPublicPath(pathname: string): boolean {
     pathname.startsWith("/_next") ||
     pathname.startsWith("/static") ||
     pathname.startsWith("/api/inngest") ||
-    pathname.startsWith("/api/webhooks") ||
-    pathname.startsWith("/api/auth")
+    pathname.startsWith("/api/webhooks")
   ) {
     return true;
   }
@@ -41,6 +40,37 @@ function isPublicPath(pathname: string): boolean {
 }
 
 const SESSION_COOKIE = "cf_session";
+
+/**
+ * Attaches comprehensive production security headers to all HTTP responses (S7).
+ */
+function applySecurityHeaders(response: NextResponse): NextResponse {
+  response.headers.set("X-Frame-Options", "DENY");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+
+  if (env.isProduction) {
+    response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  }
+
+  const cspHeader = [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://*.supabase.co https://api.stripe.com https://*.inngest.com",
+    "frame-src 'self' https://js.stripe.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+
+  response.headers.set("Content-Security-Policy", cspHeader);
+
+  return response;
+}
 
 /**
  * Verifies the HMAC-signed session cookie using Web Crypto API (Edge-compatible).
@@ -83,9 +113,9 @@ async function verifySessionCookie(token: string): Promise<boolean> {
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  // Always allow public paths through
+  // Always allow public paths through with security headers
   if (isPublicPath(pathname)) {
-    return NextResponse.next({ request });
+    return applySecurityHeaders(NextResponse.next({ request }));
   }
 
   // ── Check session cookie (works with or without live Supabase) ──
@@ -122,20 +152,20 @@ export async function middleware(request: NextRequest) {
     hasSupabaseSession = !!user;
 
     if (hasSupabaseSession) {
-      return supabaseResponse;
+      return applySecurityHeaders(supabaseResponse);
     }
   }
 
   // ── Auth decision: allow if either session is valid ──
   if (hasValidSession || hasSupabaseSession) {
-    return NextResponse.next({ request });
+    return applySecurityHeaders(NextResponse.next({ request }));
   }
 
   // ── Not authenticated → redirect to login ──
   const url = request.nextUrl.clone();
   url.pathname = "/login";
   url.searchParams.set("returnTo", pathname);
-  return NextResponse.redirect(url);
+  return applySecurityHeaders(NextResponse.redirect(url));
 }
 
 export const config = {

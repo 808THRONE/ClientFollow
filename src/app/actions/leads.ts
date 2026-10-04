@@ -104,7 +104,7 @@ export async function createLeadAction(
       created = await leadsRepo.createLead(leadData);
     } else {
       created = {
-        id: leadData.id || `lead_${Date.now()}`,
+        id: leadData.id || crypto.randomUUID(),
         org_id: leadData.org_id,
         name: leadData.name || "New Lead",
         email: leadData.email || "",
@@ -120,14 +120,17 @@ export async function createLeadAction(
       };
     }
 
-    // Fire Inngest event
+    const playbook = getPlaybookForIndustry(created.detected_service || "general");
+
+    // Fire Inngest event with configured playbook steps
     await inngest.send({
       name: "app/lead.detected",
       data: {
-        lead_id: created.id || `lead_${Date.now()}`,
+        lead_id: created.id || crypto.randomUUID(),
         org_id: created.org_id,
         service: created.detected_service || undefined,
         requires_approval: created.requires_approval,
+        playbook_steps: playbook.steps,
       },
     });
 

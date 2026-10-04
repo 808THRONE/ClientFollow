@@ -30,14 +30,3 @@ export function createBrowserSupabaseClient(): SupabaseClient {
     },
   });
 }
-
-/**
- * @deprecated Use createServerSupabaseClient() or createBrowserSupabaseClient() instead.
- * Kept temporarily for migration — will be removed.
- */
-export const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: typeof window !== "undefined",
-    autoRefreshToken: true,
-  },
-});

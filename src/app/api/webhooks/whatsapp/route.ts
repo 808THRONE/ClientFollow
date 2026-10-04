@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { inngest } from "@/inngest/client";
+import { createServerSupabaseClient } from "@/lib/db/client";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import crypto from "crypto";
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * Meta WhatsApp Message Ingestion (POST) with HMAC signature verification
+ * Meta WhatsApp Message Ingestion (POST) with HMAC signature verification and sender matching
  */
 export async function POST(req: NextRequest) {
   try {
@@ -77,29 +78,89 @@ export async function POST(req: NextRequest) {
     const message = changes?.value?.messages?.[0];
 
     if (message) {
-      const fromPhone = message.from;
+      const fromPhone = String(message.from || "").trim();
       const textBody = message.text?.body || "";
       const messageId = message.id;
 
-      // Emit reply event to immediately halt any pending follow-up sequence
-      try {
-        await inngest.send({
-          name: "app/lead.replied",
-          data: {
-            lead_id: `lead_whatsapp_${fromPhone}`,
-            channel: "whatsapp",
-            reply_snippet: textBody,
-            sentiment: "neutral",
-          },
-        });
-      } catch (inngestErr: any) {
-        logger.warn("Inngest dispatch warning on WhatsApp message", {
-          service: "WhatsAppWebhook",
-          error: inngestErr.message,
-        });
+      let matchedLeadId: string | null = null;
+      let matchedOrgId: string | null = null;
+
+      // Verify sender against known active leads in database
+      if (env.isSupabaseLive && fromPhone) {
+        try {
+          const supabase = createServerSupabaseClient();
+          const cleanPhone = fromPhone.replace(/^\+/, "");
+          const { data: matchedLead, error: lookupErr } = await supabase
+            .from("leads")
+            .select("id, org_id, status")
+            .or(`phone.eq.${cleanPhone},phone.eq.+${cleanPhone}`)
+            .not("status", "in", '("booked","lost")')
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (lookupErr) {
+            logger.warn("WhatsApp lead lookup database query warning", {
+              service: "WhatsAppWebhook",
+              fromPhone,
+              error: lookupErr.message,
+            });
+          } else if (matchedLead) {
+            matchedLeadId = matchedLead.id;
+            matchedOrgId = matchedLead.org_id;
+
+            // Advance lead status to 'replied' in DB
+            await supabase
+              .from("leads")
+              .update({ status: "replied", updated_at: new Date().toISOString() })
+              .eq("id", matchedLead.id);
+          }
+        } catch (dbErr: any) {
+          logger.warn("Database lookup error during WhatsApp sender verification", {
+            service: "WhatsAppWebhook",
+            fromPhone,
+            error: dbErr.message,
+          });
+        }
+      } else {
+        // Mock / development fallback
+        matchedLeadId = `lead_whatsapp_${fromPhone}`;
       }
 
-      return NextResponse.json({ success: true, messageId });
+      if (matchedLeadId) {
+        // Emit reply event to immediately halt pending cadence
+        try {
+          await inngest.send({
+            name: "app/lead.replied",
+            data: {
+              lead_id: matchedLeadId,
+              org_id: matchedOrgId || undefined,
+              channel: "whatsapp",
+              reply_snippet: textBody,
+              sentiment: "neutral",
+            },
+          });
+        } catch (inngestErr: any) {
+          logger.warn("Inngest dispatch warning on WhatsApp message", {
+            service: "WhatsAppWebhook",
+            error: inngestErr.message,
+          });
+        }
+
+        return NextResponse.json({ success: true, messageId, leadId: matchedLeadId });
+      }
+
+      logger.info("WhatsApp message received from unknown sender; no active lead cadence matched", {
+        service: "WhatsAppWebhook",
+        fromPhone,
+      });
+
+      return NextResponse.json({
+        success: true,
+        messageId,
+        matched: false,
+        note: "Message acknowledged; sender not matched to an active cadence",
+      });
     }
 
     return NextResponse.json({ success: true, status: "ignored_non_message_event" });

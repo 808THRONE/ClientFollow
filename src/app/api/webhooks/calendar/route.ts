@@ -16,10 +16,19 @@ export async function POST(req: NextRequest) {
     if (env.isSupabaseLive) {
       try {
         const supabase = createServerSupabaseClient();
-        const { data, error } = await supabase
+        let query = supabase
           .from("leads")
           .select("id, email, phone, org_id, status")
           .not("status", "in", '("booked","lost")');
+
+        if (attendeeEmail) {
+          query = query.ilike("email", attendeeEmail);
+        } else if (attendeePhone) {
+          const cleanPhone = attendeePhone.replace(/^\+/, "");
+          query = query.or(`phone.eq.${cleanPhone},phone.eq.+${cleanPhone}`);
+        }
+
+        const { data, error } = await query.limit(5);
 
         if (!error && Array.isArray(data)) {
           activeLeads = data;
@@ -41,7 +50,8 @@ export async function POST(req: NextRequest) {
           await supabase
             .from("leads")
             .update({ status: "booked", updated_at: new Date().toISOString() })
-            .eq("id", result.matchedLeadId);
+            .eq("id", result.matchedLeadId)
+            .neq("status", "booked");
         } catch (err: any) {
           logger.warn("Failed to update lead status to booked in database", {
             service: "CalendarWebhook",

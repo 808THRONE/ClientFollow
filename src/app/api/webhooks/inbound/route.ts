@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { LeadSchema } from "@/lib/db/validators";
 import { inngest } from "@/inngest/client";
 import { getPlaybookForIndustry } from "@/lib/services/playbook.service";
@@ -8,39 +9,66 @@ import { logger } from "@/lib/logger";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const InboundPayloadSchema = z.object({
+  org_id: z.string().min(1, "org_id is required"),
+  industry: z.string().max(50).optional(),
+  requires_approval: z.boolean().optional(),
+  name: z.string().max(200).optional().nullable(),
+  email: z.string().email("Invalid email format").optional().nullable(),
+  phone: z.string().max(50).optional().nullable(),
+  service: z.string().max(100).optional().nullable(),
+  urgency: z.enum(["low", "medium", "high"]).optional(),
+  lead: z
+    .object({
+      name: z.string().max(200).optional().nullable(),
+      email: z.string().email("Invalid email format").optional().nullable(),
+      phone: z.string().max(50).optional().nullable(),
+      service: z.string().max(100).optional().nullable(),
+      urgency: z.enum(["low", "medium", "high"]).optional(),
+    })
+    .optional(),
+});
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const rawBody = await req.json();
+    const parsedPayload = InboundPayloadSchema.safeParse(rawBody);
 
-    if (!body.org_id) {
+    if (!parsedPayload.success) {
       return NextResponse.json(
-        { success: false, error: "org_id is required" },
+        { success: false, error: "Invalid payload schema", details: parsedPayload.error.format() },
         { status: 400 }
       );
     }
 
+    const { org_id: orgId, industry, requires_approval, lead, ...directFields } = parsedPayload.data;
+
     // In production, validate UUID format
-    if (env.isProduction && !UUID_REGEX.test(body.org_id)) {
+    if (env.isProduction && !UUID_REGEX.test(orgId)) {
       return NextResponse.json(
         { success: false, error: "Invalid org_id: must be a valid UUID" },
         { status: 400 }
       );
     }
 
-    const orgId = body.org_id;
-    const leadData = body.lead || body;
+    // Extract only strictly allowed contact fields — preventing any mass assignment
+    const contactName = lead?.name ?? directFields.name ?? null;
+    const contactEmail = lead?.email ?? directFields.email ?? null;
+    const contactPhone = lead?.phone ?? directFields.phone ?? null;
+    const detectedService = lead?.service ?? directFields.service ?? "General Inquiry";
+    const detectedUrgency = lead?.urgency ?? directFields.urgency ?? "medium";
 
     const parsedLead = LeadSchema.safeParse({
       org_id: orgId,
-      name: leadData.name || null,
-      email: leadData.email || null,
-      phone: leadData.phone || null,
+      name: contactName,
+      email: contactEmail,
+      phone: contactPhone,
       source: "webhook",
       status: "new_lead",
-      detected_service: leadData.service || leadData.detected_service || "General Inquiry",
-      detected_urgency: leadData.urgency || "medium",
+      detected_service: detectedService,
+      detected_urgency: detectedUrgency,
       sentiment: "neutral",
-      requires_approval: !!body.requires_approval,
+      requires_approval: requires_approval ?? true,
     });
 
     if (!parsedLead.success) {
@@ -50,8 +78,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const leadId = `lead_${Date.now()}`;
-    const playbook = getPlaybookForIndustry(body.industry || "general");
+    const leadId = crypto.randomUUID();
+    const playbook = getPlaybookForIndustry(industry || "general");
 
     if (env.isSupabaseLive) {
       try {

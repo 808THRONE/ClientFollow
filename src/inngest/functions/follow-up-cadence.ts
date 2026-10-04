@@ -52,6 +52,7 @@ export const followUpCadence = inngest.createFunction(
   {
     id: "lead-follow-up-cadence",
     name: "Lead Follow-Up Cadence Execution Engine",
+    retries: 3,
     cancelOn: [
       { event: "app/lead.replied", match: "data.lead_id" },
       { event: "app/lead.booked", match: "data.lead_id" },
@@ -81,6 +82,25 @@ export const followUpCadence = inngest.createFunction(
           timeout: "5d",
           match: "data.lead_id",
         });
+
+        // Reset approval_pending flag in DB once approval is granted
+        if (env.isSupabaseLive) {
+          await step.run(`clear-approval-pending-${action.stepNumber}`, async () => {
+            try {
+              const supabase = createServerSupabaseClient();
+              await supabase
+                .from("leads")
+                .update({ approval_pending: false, updated_at: new Date().toISOString() })
+                .eq("id", lead_id);
+            } catch (err: any) {
+              logger.warn("Failed to clear approval_pending flag in DB", {
+                service: "FollowUpCadence",
+                leadId: lead_id,
+                error: err.message,
+              });
+            }
+          });
+        }
       }
 
       // 3. Dispatch touch
@@ -125,15 +145,19 @@ export const followUpCadence = inngest.createFunction(
           return { aborted: true, reason: `lead status is ${leadStatus}` };
         }
 
-        // Advance lead status to contacted if currently new
+        // Advance lead status to contacted if currently new_lead
         if (env.isSupabaseLive) {
           try {
             const supabase = createServerSupabaseClient();
             const { error: updateErr } = await supabase
               .from("leads")
-              .update({ status: "contacted", updated_at: new Date().toISOString() })
+              .update({
+                status: "contacted",
+                approval_pending: false,
+                updated_at: new Date().toISOString(),
+              })
               .eq("id", lead_id)
-              .eq("status", "new_lead");
+              .in("status", ["new_lead", "contacted"]);
 
             if (updateErr) {
               logger.error("Failed to advance lead to contacted status", {
@@ -181,6 +205,7 @@ export const followUpCadence = inngest.createFunction(
               leadId: lead_id,
               error: error.message,
             });
+            throw new Error(`Database error marking lead as lost: ${error.message}`);
           }
         } catch (err: any) {
           logger.error("Database error marking lead as lost", {
@@ -188,6 +213,7 @@ export const followUpCadence = inngest.createFunction(
             leadId: lead_id,
             error: err.message,
           });
+          throw err;
         }
       }
 

@@ -3,15 +3,56 @@ import { signToken } from "@/lib/session-utils";
 import { createServerSupabaseClient } from "@/lib/db/client";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
+import { checkRateLimit, resetRateLimit } from "@/lib/rate-limit";
 
 const SESSION_COOKIE = "cf_session";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
+const SESSION_MAX_AGE = 60 * 60 * 24; // 24 hours (reduced from 7 days for session hygiene)
+
+// Rate limit: 5 login attempts per 15 minutes per IP
+const LOGIN_RATE_LIMIT_OPTIONS = {
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+};
+
+function getClientIp(req: NextRequest): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) {
+    return forwarded.split(",")[0].trim();
+  }
+  return req.headers.get("x-real-ip") || "127.0.0.1";
+}
 
 /**
- * POST /api/auth/login — Validates credentials and sets the session cookie.
+ * POST /api/auth/login — Validates credentials and sets the session cookie with rate limiting.
  */
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req);
+    const rateLimitKey = `login_${ip}`;
+    const rateLimitResult = checkRateLimit(rateLimitKey, LOGIN_RATE_LIMIT_OPTIONS);
+
+    if (!rateLimitResult.allowed) {
+      logger.warn("Login attempt blocked by rate limit", {
+        service: "AuthLogin",
+        ip,
+        retryAfter: rateLimitResult.resetInSeconds,
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Too many login attempts. Please try again later.",
+          retryAfter: rateLimitResult.resetInSeconds,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": rateLimitResult.resetInSeconds.toString(),
+          },
+        }
+      );
+    }
+
     const body = await req.json();
     const { email, password, orgId = "org_demo" } = body;
 
@@ -44,6 +85,7 @@ export async function POST(req: NextRequest) {
           logger.warn("Login authentication failed", {
             service: "AuthLogin",
             email,
+            ip,
             error: authError.message,
           });
           return NextResponse.json(
@@ -53,6 +95,9 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+
+    // Reset rate limit on successful credentials verification
+    resetRateLimit(rateLimitKey);
 
     const token = signToken({ email, orgId, ts: Date.now().toString() });
 
