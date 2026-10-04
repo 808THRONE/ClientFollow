@@ -22,7 +22,10 @@ export function substituteTemplateVariables(
 
   for (const [key, val] of Object.entries(vars)) {
     if (val !== undefined && val !== null) {
-      result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "gi"), String(val));
+      // Escape regex-special characters in the key so user-provided
+      // variable names (e.g. "plan.2x") can't corrupt the pattern.
+      const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      result = result.replace(new RegExp(`\\{\\{${escapedKey}\\}\\}`, "gi"), String(val));
     }
   }
 

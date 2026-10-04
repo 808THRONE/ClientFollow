@@ -42,6 +42,13 @@ export type ClientFollowEvents = {
       reason?: string;
     };
   };
+  "app/sequence.resent": {
+    data: {
+      lead_id: string;
+      org_id: string;
+      requested_by?: string;
+    };
+  };
   "app/lead.replied": {
     data: {
       lead_id: string;

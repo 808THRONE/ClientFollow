@@ -69,12 +69,21 @@ export function calculateRecoveredPipelineValue(leads: Array<{ estimatedValue: n
  * Estimates the recovery monetary value of a single lead based on its detected service and industry benchmarks.
  * Replaces arbitrary hardcoded magic numbers with verified benchmark sums.
  */
+/**
+ * Estimates the recovery monetary value of a single lead based on its detected
+ * service and industry benchmarks.
+ *
+ * The industry argument must be supplied by callers that know the tenant's
+ * vertical (dashboard, scanner, onboarding). When unknown, a neutral default
+ * benchmark is used instead of silently assuming a specific industry.
+ */
 export function estimateLeadValue(
   lead: { detected_service?: string | null; service?: string | null },
-  industry: string = "dentist"
+  industry?: string | null
 ): number {
   const serviceText = (lead.detected_service || lead.service || "").toLowerCase();
-  const benchmarkConfig = INDUSTRY_DEAL_BENCHMARKS[industry.toLowerCase()] || { default: 1000, keywords: {} };
+  const industryKey = (industry || "").toLowerCase();
+  const benchmarkConfig = INDUSTRY_DEAL_BENCHMARKS[industryKey] || { default: 1000, keywords: {} };
 
   for (const [kw, val] of Object.entries(benchmarkConfig.keywords)) {
     if (serviceText.includes(kw)) {

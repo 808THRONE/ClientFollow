@@ -1,22 +1,27 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   X,
   CheckCircle,
-  Calendar,
   AlertCircle,
-  Sparkles,
   User,
   Mail,
   Phone,
-  ArrowRight,
   Trash2,
   Send,
   MessageSquare,
   Clock,
-  Plus,
+  ShieldAlert,
 } from "lucide-react";
 import { Lead } from "@/lib/db/types";
 import { generateDraftFollowUpMessage } from "@/lib/services/approval.service";
+import { saveLeadNoteAction, getLeadActivityAction } from "@/app/actions/leads";
+
+interface ActivityItem {
+  label: string;
+  detail: string;
+  at: string;
+  kind: "created" | "run" | "message";
+}
 
 interface LeadDrawerProps {
   lead: Lead | null;
@@ -26,6 +31,7 @@ interface LeadDrawerProps {
   onMoveStage: (leadId: string, newStage: string) => void;
   onDelete?: (leadId: string) => void;
   onResend?: (leadId: string) => void;
+  onReject?: (leadId: string) => void;
 }
 
 export const LeadDrawer: React.FC<LeadDrawerProps> = ({
@@ -36,25 +42,63 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
   onMoveStage,
   onDelete,
   onResend,
+  onReject,
 }) => {
   const [newNote, setNewNote] = useState("");
-  const [notes, setNotes] = useState<string[]>([
-    "Initial inbound inquiry detected via automated channel listener.",
-  ]);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [notes, setNotes] = useState<string[]>([]);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Sync persisted notes and real activity when the drawer target changes.
+  useEffect(() => {
+    if (!lead || !lead.id) return;
+    setConfirmDelete(false);
+    setNoteError(null);
+    setNotes(lead.notes ? lead.notes.split("\n").filter(Boolean) : []);
+
+    let cancelled = false;
+    getLeadActivityAction(lead.id)
+      .then((res) => {
+        if (!cancelled && res.success) {
+          setActivity(res.items);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setActivity([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lead]);
 
   if (!isOpen || !lead) return null;
 
-  const handleAddNote = (e: React.FormEvent) => {
+  const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newNote.trim()) return;
-    setNotes((prev) => [`[${new Date().toLocaleTimeString()}] ${newNote.trim()}`, ...prev]);
+    if (!lead?.id || !newNote.trim()) return;
+
+    const entry = `[${new Date().toLocaleTimeString()}] ${newNote.trim()}`;
+    setNotes((prev) => [entry, ...prev]);
     setNewNote("");
+    setNoteError(null);
+
+    try {
+      const res = await saveLeadNoteAction(lead.id, entry.replace(/^\[[^\]]+\]\s*/, ""));
+      if (!res.success) {
+        setNotes((prev) => prev.filter((n) => n !== entry));
+        setNoteError(res.error || "Failed to save note");
+      }
+    } catch (err: unknown) {
+      setNotes((prev) => prev.filter((n) => n !== entry));
+      const msg = err instanceof Error ? err.message : String(err);
+      setNoteError(`Failed to save note: ${msg}`);
+    }
   };
 
   const handleResendClick = () => {
-    setResendStatus("Follow-up dispatched to queue!");
+    setResendStatus("Follow-up queued for dispatch");
     if (onResend && lead.id) {
       onResend(lead.id);
     }
@@ -62,12 +106,11 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
   };
 
   const handleDeleteClick = () => {
-    if (confirm(`Are you sure you want to permanently delete lead "${lead.name}"?`)) {
-      if (onDelete && lead.id) {
-        onDelete(lead.id);
-      }
-      onClose();
+    if (onDelete && lead.id) {
+      onDelete(lead.id);
     }
+    setConfirmDelete(false);
+    onClose();
   };
 
   return (
@@ -109,7 +152,7 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
               </span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-slate-500 font-medium">AI Sentiment:</span>
+              <span className="text-slate-500 font-medium">Sentiment:</span>
               <span className="font-semibold text-slate-800 capitalize">{lead.sentiment}</span>
             </div>
             <div className="flex justify-between items-center">
@@ -136,11 +179,13 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
                   onClick={() => onApprove(lead.id || "")}
                   className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer"
                 >
-                  Approve & Dispatch Now
+                  Approve &amp; Dispatch
                 </button>
                 <button
                   type="button"
-                  onClick={() => onMoveStage(lead.id || "", "lost")}
+                  onClick={() => {
+                    if (onReject && lead.id) onReject(lead.id);
+                  }}
                   className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-colors cursor-pointer"
                 >
                   Reject
@@ -161,7 +206,7 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
             </button>
             <button
               type="button"
-              onClick={handleDeleteClick}
+              onClick={() => setConfirmDelete(true)}
               className="p-2 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg text-xs transition-colors cursor-pointer"
               title="Delete lead permanently"
               aria-label="Delete lead permanently"
@@ -171,9 +216,38 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
           </div>
 
           {resendStatus && (
-            <div className="p-2 bg-emerald-50 text-emerald-700 text-xs rounded-lg border border-emerald-200 flex items-center gap-1.5">
+            <div className="p-2 bg-emerald-50 text-emerald-700 text-xs rounded-lg border border-emerald-200 flex items-center gap-1.5" role="status">
               <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
               <span>{resendStatus}</span>
+            </div>
+          )}
+
+          {/* Delete confirmation (in-app, replaces native confirm) */}
+          {confirmDelete && (
+            <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl space-y-2" role="alertdialog" aria-label="Confirm deletion">
+              <div className="flex items-center gap-1.5 text-rose-900 font-semibold text-xs">
+                <ShieldAlert className="h-4 w-4 text-rose-600" />
+                <span>Delete lead permanently?</span>
+              </div>
+              <p className="text-xs text-rose-800">
+                &ldquo;{lead.name}&rdquo; and its follow-up sequence will be removed. This cannot be undone.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  className="flex-1 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteClick}
+                  className="flex-1 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Delete Permanently
+                </button>
+              </div>
             </div>
           )}
 
@@ -200,7 +274,7 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
                 onClick={() => onMoveStage(lead.id || "", "booked")}
                 className="py-1.5 px-2 bg-slate-50 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 rounded-lg font-medium border border-slate-200 text-slate-700 text-center transition-colors cursor-pointer"
               >
-                Mark Booked 🎉
+                Mark Booked
               </button>
               <button
                 type="button"
@@ -212,40 +286,34 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
             </div>
           </div>
 
-          {/* Touch History / Activity Timeline */}
+          {/* Cadence Activity Timeline — hydrated from follow_up_runs/messages, no fabricated entries */}
           <div className="pt-3 border-t border-slate-100">
             <h4 className="text-xs font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
               <Clock className="h-3.5 w-3.5 text-slate-400" />
               <span>Cadence Activity Timeline</span>
             </h4>
             <div className="space-y-2 text-xs">
-              <div className="flex items-start gap-2 p-2 bg-slate-50 rounded-lg">
-                <div className="h-2 w-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0" />
-                <div>
-                  <p className="font-semibold text-slate-800">Inbound Inquiry Logged</p>
-                  <p className="text-[11px] text-slate-500">Service: {lead.detected_service} via {lead.source}</p>
-                </div>
-              </div>
-              <div className="flex items-start gap-2 p-2 bg-slate-50 rounded-lg">
-                <div className="h-2 w-2 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0" />
-                <div>
-                  <p className="font-semibold text-slate-800">Enrolled in Automated Cadence</p>
-                  <p className="text-[11px] text-slate-500">3-Touch Niche Playbook active</p>
-                </div>
-              </div>
-              {lead.status === "booked" && (
-                <div className="flex items-start gap-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg">
-                  <div className="h-2 w-2 rounded-full bg-emerald-600 mt-1.5 flex-shrink-0" />
-                  <div>
-                    <p className="font-semibold text-emerald-900">Meeting Booked on Calendar</p>
-                    <p className="text-[11px] text-emerald-700">Follow-up sequence automatically halted</p>
+              {activity.length === 0 ? (
+                <p className="text-[11px] text-slate-400 italic p-2">No recorded activity yet.</p>
+              ) : (
+                activity.map((item, idx) => (
+                  <div key={idx} className="flex items-start gap-2 p-2 bg-slate-50 rounded-lg">
+                    <div
+                      className={`h-2 w-2 rounded-full mt-1.5 flex-shrink-0 ${
+                        item.kind === "message" ? "bg-emerald-500" : item.kind === "run" ? "bg-indigo-500" : "bg-blue-500"
+                      }`}
+                    />
+                    <div>
+                      <p className="font-semibold text-slate-800">{item.label}</p>
+                      <p className="text-[11px] text-slate-500">{item.detail}</p>
+                    </div>
                   </div>
-                </div>
+                ))
               )}
             </div>
           </div>
 
-          {/* Operator Notes */}
+          {/* Operator Notes — persisted to the lead record */}
           <div className="pt-3 border-t border-slate-100">
             <h4 className="text-xs font-semibold text-slate-700 mb-2">Internal Notes</h4>
             <form onSubmit={handleAddNote} className="flex gap-1.5 mb-2">
@@ -263,6 +331,9 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
                 Save Note
               </button>
             </form>
+            {noteError && (
+              <p className="text-[11px] text-rose-600 mb-1.5" role="alert">{noteError}</p>
+            )}
             <div className="space-y-1.5 max-h-32 overflow-y-auto">
               {notes.map((note, idx) => (
                 <div key={idx} className="p-2 bg-slate-50 rounded-lg text-[11px] text-slate-600 border border-slate-100">

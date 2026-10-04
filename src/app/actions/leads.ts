@@ -121,7 +121,7 @@ export async function createLeadAction(
       created = await leadsRepo.createLead(leadData);
     } else {
       created = {
-        id: leadData.id || crypto.randomUUID(),
+        id: crypto.randomUUID(),
         org_id: leadData.org_id,
         name: leadData.name || "New Lead",
         email: leadData.email || "",
@@ -228,6 +228,50 @@ export async function enrollScannedLeadsAction(
     return { success: false, enrolledCount: 0, errors: ["orgId is required"] };
   }
 
+  // Enrolling leads writes real rows and fires real cadence workflows.
+  // In live mode this is only allowed when the org has an active channel
+  // integration — otherwise we'd be creating production leads (from sample
+  // onboarding data, for example) that real follow-up sequences would target.
+  if (env.isSupabaseLive) {
+    try {
+      const supabase = createServerSupabaseClient();
+      const { data: integrations, error: integrationErr } = await supabase
+        .from("channel_integrations")
+        .select("id")
+        .eq("org_id", orgId)
+        .eq("status", "active")
+        .limit(1);
+
+      if (integrationErr || !integrations || integrations.length === 0) {
+        const msg = integrationErr?.message || "no active channel integration";
+        logger.warn("Enrollment blocked: org has no active channel integration", {
+          service: "LeadsAction",
+          orgId,
+          reason: msg,
+        });
+        return {
+          success: false,
+          enrolledCount: 0,
+          errors: [
+            "This organization has no active channel integration. Connect Gmail or WhatsApp in Settings before enrolling leads into the cadence.",
+          ],
+        };
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("Failed to check channel integrations before enrollment", {
+        service: "LeadsAction",
+        orgId,
+        error: msg,
+      });
+      return {
+        success: false,
+        enrolledCount: 0,
+        errors: [`Could not verify channel integrations: ${msg}`],
+      };
+    }
+  }
+
   const playbook = getPlaybookForIndustry(industry);
   const leadsRepo = getLeadsRepo();
 
@@ -236,14 +280,15 @@ export async function enrollScannedLeadsAction(
   const errors: string[] = [];
 
   for (const lead of scannedLeads) {
-    const leadId = lead.id || `lead_scanned_${Date.now()}_${enrolled}`;
+    // Server-generated UUID — scanner/demo ids are never written to leads.id
+    const leadId = crypto.randomUUID();
 
     if (env.isSupabaseLive) {
       try {
         const created = await leadsRepo.createLead({
           id: leadId,
           org_id: orgId,
-          name: lead.sender.split("@")[0].replace(".", " "),
+          name: lead.sender.split("@")[0].replace(/[._-]/g, " "),
           email: lead.sender,
           source: "gmail",
           status: "new_lead",
@@ -270,7 +315,7 @@ export async function enrollScannedLeadsAction(
       createdLeads.push({
         id: leadId,
         org_id: orgId,
-        name: lead.sender.split("@")[0].replace(".", " "),
+        name: lead.sender.split("@")[0].replace(/[._-]/g, " "),
         email: lead.sender,
         source: "gmail",
         status: "new_lead",
@@ -343,7 +388,10 @@ export async function deleteLeadAction(
 }
 
 /**
- * Server action to re-trigger follow-up touch for a lead.
+ * Server action to manually re-send the current follow-up touch for a lead.
+ * Emits a dedicated "resent" event — this is NOT an approval, so it must not
+ * release the cadence's approval lock (app/sequence.approved is reserved for
+ * explicit human approvals).
  */
 export async function resendFollowUpAction(
   leadId: string,
@@ -353,15 +401,15 @@ export async function resendFollowUpAction(
     return { success: false, error: "leadId is required" };
   }
 
-  await resolveEffectiveOrgId(orgId);
+  const effectiveOrgId = await resolveEffectiveOrgId(orgId);
 
   try {
     await inngest.send({
-      name: "app/sequence.approved",
+      name: "app/sequence.resent",
       data: {
         lead_id: leadId,
-        approved_by: "manual_resend",
-        step_number: 1,
+        org_id: effectiveOrgId,
+        requested_by: "manual_resend",
       },
     });
     return { success: true };
@@ -369,5 +417,197 @@ export async function resendFollowUpAction(
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("Failed to resend follow-up", { service: "LeadsAction", leadId, error: msg });
     return { success: false, error: msg };
+  }
+}
+
+/**
+ * Server action to append a private operator note to a lead.
+ */
+export async function saveLeadNoteAction(
+  leadId: string,
+  note: string,
+  orgId?: string
+): Promise<{ success: boolean; error?: string }> {
+  if (!leadId || !note || !note.trim()) {
+    return { success: false, error: "leadId and note are required" };
+  }
+
+  const effectiveOrgId = await resolveEffectiveOrgId(orgId);
+  const trimmed = note.trim();
+
+  if (env.isSupabaseLive) {
+    try {
+      const supabase = createServerSupabaseClient();
+      const { data: existing, error: fetchErr } = await supabase
+        .from("leads")
+        .select("notes")
+        .eq("id", leadId)
+        .eq("org_id", effectiveOrgId)
+        .single();
+
+      if (fetchErr && fetchErr.code !== "PGRST116") {
+        throw new Error(`Failed to read lead notes: ${fetchErr.message}`);
+      }
+
+      const entry = `[${new Date().toISOString()}] ${trimmed}`;
+      const nextNotes = existing?.notes ? `${existing.notes}\n${entry}` : entry;
+
+      const { error: updateErr } = await supabase
+        .from("leads")
+        .update({ notes: nextNotes, updated_at: new Date().toISOString() })
+        .eq("id", leadId)
+        .eq("org_id", effectiveOrgId);
+
+      if (updateErr) {
+        throw new Error(`Failed to save lead note: ${updateErr.message}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error("Failed to save lead note", { service: "LeadsAction", leadId, orgId: effectiveOrgId, error: msg });
+      return { success: false, error: msg };
+    }
+  }
+
+  return { success: true };
+}
+
+/**
+ * Server action to fetch the real activity timeline for a lead:
+ * follow-up runs plus persisted outbound messages (no fabricated entries).
+ */
+export async function getLeadActivityAction(
+  leadId: string,
+  orgId?: string
+): Promise<{
+  success: boolean;
+  items: Array<{ label: string; detail: string; at: string; kind: "created" | "run" | "message" }>;
+  error?: string;
+}> {
+  if (!leadId) {
+    return { success: false, items: [], error: "leadId is required" };
+  }
+
+  const effectiveOrgId = await resolveEffectiveOrgId(orgId);
+
+  if (!env.isSupabaseLive) {
+    return { success: true, items: [] };
+  }
+
+  try {
+    const supabase = createServerSupabaseClient();
+    const items: Array<{ label: string; detail: string; at: string; kind: "created" | "run" | "message" }> = [];
+
+    const { data: leadRow, error: leadErr } = await supabase
+      .from("leads")
+      .select("created_at, status")
+      .eq("id", leadId)
+      .eq("org_id", effectiveOrgId)
+      .single();
+
+    if (leadErr && leadErr.code !== "PGRST116") {
+      throw new Error(`Failed to read lead: ${leadErr.message}`);
+    }
+
+    if (leadRow?.created_at) {
+      items.push({
+        label: "Inbound Inquiry Logged",
+        detail: "Lead created in pipeline",
+        at: String(leadRow.created_at),
+        kind: "created",
+      });
+    }
+
+    const { data: runs, error: runsErr } = await supabase
+      .from("follow_up_runs")
+      .select("status, current_step, created_at, updated_at")
+      .eq("lead_id", leadId)
+      .eq("org_id", effectiveOrgId)
+      .order("created_at", { ascending: true });
+
+    if (runsErr) {
+      throw new Error(`Failed to read follow-up runs: ${runsErr.message}`);
+    }
+
+    for (const run of runs || []) {
+      const step = Number((run as { current_step?: number }).current_step || 1);
+      const status = String((run as { status?: string }).status || "running");
+      items.push({
+        label: status === "running" ? `Cadence Step ${step} In Progress` : `Cadence ${status.replace(/_/g, " ")}`,
+        detail: `Follow-up run (step ${step})`,
+        at: String((run as { created_at?: string }).created_at || ""),
+        kind: "run",
+      });
+    }
+
+    const { data: messages, error: msgErr } = await supabase
+      .from("messages")
+      .select("channel, sent_at")
+      .eq("lead_id", leadId)
+      .eq("org_id", effectiveOrgId)
+      .eq("direction", "outbound")
+      .order("sent_at", { ascending: true });
+
+    if (msgErr) {
+      throw new Error(`Failed to read messages: ${msgErr.message}`);
+    }
+
+    for (const message of messages || []) {
+      items.push({
+        label: "Follow-up Touch Sent",
+        detail: `Dispatched via ${String((message as { channel?: string }).channel || "channel")}`,
+        at: String((message as { sent_at?: string }).sent_at || ""),
+        kind: "message",
+      });
+    }
+
+    return { success: true, items };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error("Failed to fetch lead activity", { service: "LeadsAction", leadId, orgId: effectiveOrgId, error: msg });
+    return { success: false, items: [], error: msg };
+  }
+}
+
+/**
+ * Server action to fetch the session user's organization profile
+ * (name + industry) so the dashboard can value leads with the
+ * correct industry benchmarks instead of a hardcoded default.
+ */
+export async function getOrgProfileAction(): Promise<{
+  success: boolean;
+  name: string | null;
+  industry: string | null;
+}> {
+  const session = await getSessionAction();
+  if (!session?.orgId) {
+    return { success: true, name: null, industry: null };
+  }
+
+  if (!env.isSupabaseLive) {
+    return { success: true, name: null, industry: null };
+  }
+
+  try {
+    const supabase = createServerSupabaseClient();
+    const { data, error } = await supabase
+      .from("organizations")
+      .select("name, industry")
+      .eq("id", session.orgId)
+      .single();
+
+    if (error && error.code !== "PGRST116") {
+      logger.warn("Failed to fetch org profile", { service: "LeadsAction", orgId: session.orgId, error: error.message });
+      return { success: true, name: null, industry: null };
+    }
+
+    return {
+      success: true,
+      name: data?.name || null,
+      industry: data?.industry || null,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn("Failed to fetch org profile", { service: "LeadsAction", orgId: session.orgId, error: msg });
+    return { success: true, name: null, industry: null };
   }
 }

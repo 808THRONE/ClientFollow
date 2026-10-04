@@ -47,7 +47,7 @@ export function formatLeadBadge(lead: Lead): BadgeInfo {
     case "replied":
       return { label: "Takeover Needed", variant: "destructive" };
     case "booked":
-      return { label: "Booked 🎉", variant: "success" };
+      return { label: "Booked", variant: "success" };
     case "contacted":
       return { label: "Follow-up Active", variant: "default" };
     case "lost":

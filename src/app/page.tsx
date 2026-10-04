@@ -24,13 +24,16 @@ import {
   createLeadAction,
   deleteLeadAction,
   resendFollowUpAction,
+  getOrgProfileAction,
 } from "@/app/actions/leads";
+import { rejectLeadSequence } from "@/app/actions/approval";
 import { getSessionAction } from "@/app/actions/session";
 import { estimateLeadValue } from "@/lib/services/lead-valuation";
 
 export default function DashboardPage() {
   const [leads, setLeads] = useState<Lead[]>(DEMO_LEADS);
   const [currentOrgId, setCurrentOrgId] = useState<string>("org_apex_dental");
+  const [orgIndustry, setOrgIndustry] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [notification, setNotification] = useState<string | null>(null);
@@ -45,9 +48,15 @@ export default function DashboardPage() {
           setCurrentOrgId(orgId);
         }
 
-        const res = await getLeadsAction(orgId);
-        if (isMounted && res.success && res.leads && res.leads.length > 0) {
-          setLeads(res.leads);
+        const [profileRes, leadsRes] = await Promise.all([
+          getOrgProfileAction(),
+          getLeadsAction(orgId),
+        ]);
+        if (isMounted && profileRes.success && profileRes.industry) {
+          setOrgIndustry(profileRes.industry);
+        }
+        if (isMounted && leadsRes.success && leadsRes.leads && leadsRes.leads.length > 0) {
+          setLeads(leadsRes.leads);
         }
       } catch (err: unknown) {
         console.warn("[DashboardPage] Offline fallback used:", err);
@@ -123,18 +132,50 @@ export default function DashboardPage() {
   };
 
   const handleAddLead = async (newLead: Lead) => {
-    // Optimistic UI state mutation
+    // Optimistic UI state mutation (client-side key only — the server
+    // assigns the real UUID and we reconcile on success).
     setLeads((prev) => [newLead, ...prev]);
-    showNotification(`New lead "${newLead.name}" enrolled into cadence`);
 
     try {
-      await createLeadAction({
+      const res = await createLeadAction({
         ...newLead,
         org_id: currentOrgId,
       });
+      if (res.success && res.lead) {
+        setLeads((prev) =>
+          prev.map((l) => (l.id === newLead.id ? { ...l, ...res.lead } : l))
+        );
+        showNotification(`New lead "${res.lead.name || newLead.name}" enrolled into cadence`);
+      } else {
+        setLeads((prev) => prev.filter((l) => l.id !== newLead.id));
+        showNotification(`Failed to add lead: ${res.error || "Unknown error"}`);
+      }
     } catch (err: unknown) {
+      setLeads((prev) => prev.filter((l) => l.id !== newLead.id));
       const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[DashboardPage] Create lead action notice: ${msg}`);
+      showNotification(`Failed to add lead: ${msg}`);
+    }
+  };
+
+  const handleRejectSequence = async (leadId: string) => {
+    const previousLeads = [...leads];
+    setLeads((prev) =>
+      prev.map((l) =>
+        l.id === leadId ? { ...l, approval_pending: false, status: "lost" } : l
+      )
+    );
+    showNotification("Sequence rejected; follow-up cancelled");
+
+    try {
+      const res = await rejectLeadSequence({ leadId, reason: "Rejected from lead drawer" });
+      if (res.success === false) {
+        setLeads(previousLeads);
+        showNotification(`Failed to reject sequence: ${res.error || "Unknown error"}`);
+      }
+    } catch (err: unknown) {
+      setLeads(previousLeads);
+      const msg = err instanceof Error ? err.message : String(err);
+      showNotification(`Failed to reject sequence: ${msg}`);
     }
   };
 
@@ -186,9 +227,9 @@ export default function DashboardPage() {
   const bookedCount = leads.filter((l) => l.status === "booked").length;
   const contactedCount = leads.filter((l) => l.status === "contacted").length;
   const repliedCount = leads.filter((l) => l.status === "replied").length;
-  const estimatedRecoveredRevenue = leads
+  const estimatedBookedValue = leads
     .filter((l) => l.status === "booked")
-    .reduce((sum, l) => sum + estimateLeadValue(l), 0);
+    .reduce((sum, l) => sum + estimateLeadValue(l, orgIndustry || undefined), 0);
 
   return (
     <AppShell
@@ -223,7 +264,7 @@ export default function DashboardPage() {
                   {pendingApprovals.length} Follow-up {pendingApprovals.length === 1 ? "draft requires" : "drafts require"} manual approval
                 </h4>
                 <p className="text-xs text-amber-700">
-                  Personalize and approve AI-generated messages before dispatching to prospective clients.
+                  Personalize and approve follow-up drafts before they are sent to prospective clients.
                 </p>
               </div>
             </div>
@@ -275,15 +316,15 @@ export default function DashboardPage() {
 
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-2xs">
             <div className="flex items-center justify-between text-slate-500 text-xs font-semibold uppercase tracking-wider">
-              <span>Revenue Recovered</span>
-              <TrendingUp className="h-4 w-4 text-emerald-600" />
-            </div>
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-2xl font-bold text-emerald-600">
-                ${new Intl.NumberFormat("en-US").format(estimatedRecoveredRevenue)}
-              </span>
-              <span className="text-xs text-slate-400">{bookedCount} Booked</span>
-            </div>
+                <span>Est. Booked Value</span>
+                <TrendingUp className="h-4 w-4 text-emerald-600" />
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-bold text-emerald-600">
+                  ${new Intl.NumberFormat("en-US").format(estimatedBookedValue)}
+                </span>
+                <span className="text-xs text-slate-400">{bookedCount} Booked · estimated</span>
+              </div>
           </div>
         </div>
 
@@ -294,7 +335,7 @@ export default function DashboardPage() {
               Follow-Up Pipeline
             </h2>
             <p className="text-xs text-slate-500">
-              Drag cards between stages or click any lead to view timeline, sentiment, and AI touch history.
+              Drag cards between stages or click any lead to view timeline, sentiment, and touch history.
             </p>
           </div>
 
@@ -347,6 +388,7 @@ export default function DashboardPage() {
             onApproveLead={handleApproveLead}
             onDeleteLead={handleDeleteLead}
             onResendTouch={handleResendTouch}
+            onRejectSequence={handleRejectSequence}
           />
         </div>
       </div>

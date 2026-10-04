@@ -104,16 +104,26 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, 
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [scannedLeads, setScannedLeads] = useState<ScannedLeadResult[]>([]);
   const [isEnrolling, setIsEnrolling] = useState<boolean>(false);
+  const [enrollError, setEnrollError] = useState<string | null>(null);
 
   const handleEnrollAndLaunch = async () => {
     setIsEnrolling(true);
+    setEnrollError(null);
     try {
-      await enrollScannedLeadsAction(orgId, selectedIndustry, scannedLeads);
+      const res = await enrollScannedLeadsAction(orgId, selectedIndustry, scannedLeads);
+      if (res.success) {
+        if (onComplete) onComplete();
+        router.push("/?enrolled=" + res.enrolledCount);
+      } else {
+        // Do NOT complete onboarding when enrollment failed (e.g. no live
+        // channel integration) — the user needs to see why nothing was enrolled.
+        setEnrollError(res.errors?.[0] || "Enrollment failed. Check your channel connections in Settings.");
+      }
     } catch (e: unknown) {
-      console.warn("[OnboardingWizard] Enrollment notice:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setEnrollError(`Enrollment failed: ${msg}`);
     } finally {
-      if (onComplete) onComplete();
-      router.push("/?enrolled=" + scannedLeads.length);
+      setIsEnrolling(false);
     }
   };
 
@@ -381,6 +391,16 @@ export const OnboardingWizard: React.FC<OnboardingWizardProps> = ({ onComplete, 
                   </div>
                 ))}
               </div>
+
+              {enrollError && (
+                <div className="rounded-xl bg-rose-50 border border-rose-200 p-4 text-xs text-rose-900 flex items-start gap-2.5" role="alert">
+                  <AlertCircle className="h-4 w-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold">Enrollment blocked:</span>{" "}
+                    <span>{enrollError}</span>
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-end pt-4">
                 <button

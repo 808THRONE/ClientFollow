@@ -53,7 +53,7 @@ describe("Pipeline UI & Kanban Grouping Logic", () => {
       requires_approval: false,
     } as any);
 
-    expect(badge.label).toBe("Booked 🎉");
+    expect(badge.label).toBe("Booked");
     expect(badge.variant).toBe("success");
   });
 

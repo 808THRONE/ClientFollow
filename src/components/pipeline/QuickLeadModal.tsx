@@ -33,8 +33,10 @@ export function QuickLeadModal({ isOpen, onClose, onAddLead }: QuickLeadModalPro
     setIsSubmitting(true);
     setError(null);
 
+    // Client-generated key only. The server assigns the canonical UUID and
+    // overwrites this value; it is never written to the database directly.
     const newLead: Lead = {
-      id: `lead_${Date.now()}`,
+      id: crypto.randomUUID(),
       org_id: "org_demo",
       name: name.trim() || "Anonymous Lead",
       email: email.trim() || null,

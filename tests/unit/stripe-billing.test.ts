@@ -43,6 +43,53 @@ describe("Stripe Billing & Subscription Webhook Engine", () => {
     expect(update.activeLeadsLimit).toBe(100);
   });
 
+  it("trusts the line-item price over caller-supplied metadata.plan_tier", () => {
+    const event = {
+      type: "checkout.session.completed",
+      data: {
+        object: {
+          customer: "cus_stripe_123",
+          subscription: "sub_stripe_abc",
+          line_items: [
+            {
+              price: {
+                id: STRIPE_TIER_PRICES.starter,
+              },
+            },
+          ],
+          metadata: {
+            org_id: "org_growth_123",
+            plan_tier: "pro",
+          },
+        },
+      },
+    };
+
+    const update = processStripeWebhookEvent(event);
+    expect(update.planTier).toBe("starter");
+    expect(update.activeLeadsLimit).toBe(30);
+  });
+
+  it("falls back to metadata tier when the price id is unknown", () => {
+    const event = {
+      type: "customer.subscription.updated",
+      data: {
+        object: {
+          id: "sub_stripe_abc",
+          status: "active",
+          line_items: [{ price: { id: "price_unknown_x99" } }],
+          metadata: {
+            org_id: "org_growth_123",
+            plan_tier: "growth",
+          },
+        },
+      },
+    };
+
+    const update = processStripeWebhookEvent(event);
+    expect(update.planTier).toBe("growth");
+  });
+
   it("processes customer.subscription.deleted and reverts to canceled status", () => {
     const event = {
       type: "customer.subscription.deleted",

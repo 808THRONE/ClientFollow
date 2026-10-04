@@ -115,6 +115,28 @@ export function verifyStripeWebhookSignature(
 /**
  * Parses Stripe webhook events and maps them to organization tier and status updates.
  */
+/**
+ * Derives the plan tier from the event's line-item price when available.
+ * The price id is authoritative (billed by Stripe); caller-supplied metadata
+ * is only a fallback.
+ */
+function derivePlanTierFromLineItems(obj: Record<string, unknown> | null | undefined): string | undefined {
+  const lineItems = obj?.line_items;
+  if (!Array.isArray(lineItems) || lineItems.length === 0) {
+    return undefined;
+  }
+
+  const firstItem = lineItems[0] as { price?: { id?: string } | string } | null;
+  const price = firstItem?.price;
+  const priceId = typeof price === "string" ? price : price?.id;
+  if (!priceId) {
+    return undefined;
+  }
+
+  const entry = Object.entries(STRIPE_TIER_PRICES).find(([, knownPriceId]) => knownPriceId === priceId);
+  return entry?.[0];
+}
+
 export function processStripeWebhookEvent(
   event: Stripe.Event | { type?: string; data?: { object?: Record<string, unknown> } } | unknown
 ): StripeWebhookResult {
@@ -126,7 +148,7 @@ export function processStripeWebhookEvent(
   switch (type) {
     case "checkout.session.completed": {
       const orgId = metadata.org_id || null;
-      const planTier = metadata.plan_tier || "starter";
+      const planTier = derivePlanTierFromLineItems(obj) || metadata.plan_tier || "starter";
       const config = TIER_CONFIGS[planTier] || TIER_CONFIGS.starter;
 
       return {
@@ -151,7 +173,7 @@ export function processStripeWebhookEvent(
     case "customer.subscription.updated": {
       const orgId = metadata.org_id || null;
       const status = obj?.status === "active" ? "active" : "past_due";
-      const planTier = metadata.plan_tier || "starter";
+      const planTier = derivePlanTierFromLineItems(obj) || metadata.plan_tier || "starter";
       const config = TIER_CONFIGS[planTier] || TIER_CONFIGS.starter;
 
       return {

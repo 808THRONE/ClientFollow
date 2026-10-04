@@ -87,6 +87,7 @@ export const LeadSchema = z.object({
   requires_approval: z.boolean().default(false),
   approval_pending: z.boolean().default(false),
   external_thread_id: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
   last_interaction_at: z.date().optional(),
   created_at: z.date().optional(),
   updated_at: z.date().optional(),

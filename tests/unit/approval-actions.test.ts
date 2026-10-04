@@ -3,7 +3,11 @@ import {
   approveLeadSequence,
   rejectLeadSequence,
 } from "@/app/actions/approval";
-import { filterPendingApprovals } from "@/lib/services/approval.service";
+import {
+  filterPendingApprovals,
+  generateDraftFollowUpMessage,
+} from "@/lib/services/approval.service";
+import { composeFollowUpDraft } from "@/lib/services/draft.service";
 import { inngest } from "@/inngest/client";
 
 vi.mock("@/inngest/client", () => ({
@@ -77,5 +81,41 @@ describe("Approval Queue Service & Server Actions", () => {
     expect(result.success).toBe(false);
     expect(result.error).toBeDefined();
     expect(inngest.send).not.toHaveBeenCalled();
+  });
+
+  it("never uses a hardcoded demo persona in dental drafts", () => {
+    const lead = {
+      id: "lead_1",
+      name: "Jane Prospect",
+      detected_service: "Teeth Whitening",
+    } as any;
+
+    const draft = generateDraftFollowUpMessage(lead, "dentist");
+    expect(draft).toContain("Jane");
+    expect(draft).not.toContain("Dr. Smith");
+  });
+
+  it("uses the organization name in drafts when provided", () => {
+    const lead = {
+      id: "lead_1",
+      name: "Jane Prospect",
+      detected_service: "Full Implants",
+    } as any;
+
+    const draft = generateDraftFollowUpMessage(lead, "dentist", "Bright Smiles Dental");
+    expect(draft).toContain("Bright Smiles Dental");
+  });
+
+  it("composeFollowUpDraft falls back to the template when no LLM key is configured", async () => {
+    const lead = {
+      id: "lead_1",
+      name: "Jane Prospect",
+      detected_service: "Teeth Whitening",
+    } as any;
+
+    const draft = await composeFollowUpDraft(lead, "dentist", "Bright Smiles Dental");
+    expect(draft.source).toBe("template");
+    expect(draft.body).toContain("Jane");
+    expect(draft.body).toContain("Bright Smiles Dental");
   });
 });

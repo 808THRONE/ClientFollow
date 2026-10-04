@@ -10,13 +10,14 @@ interface KanbanBoardProps {
   onApproveLead?: (leadId: string) => void;
   onDeleteLead?: (leadId: string) => void;
   onResendTouch?: (leadId: string) => void;
+  onRejectSequence?: (leadId: string) => void;
 }
 
 const COLUMNS: Array<{ key: ColumnKey; title: string; color: string; hoverBg: string }> = [
   { key: "new_lead", title: "New Leads", color: "border-blue-300 bg-blue-50/50", hoverBg: "bg-blue-100/70 border-blue-400" },
   { key: "contacted", title: "Contacted", color: "border-indigo-300 bg-indigo-50/50", hoverBg: "bg-indigo-100/70 border-indigo-400" },
   { key: "replied", title: "Replied (Takeover)", color: "border-amber-300 bg-amber-50/50", hoverBg: "bg-amber-100/70 border-amber-400" },
-  { key: "booked", title: "Booked 🎉", color: "border-emerald-300 bg-emerald-50/50", hoverBg: "bg-emerald-100/70 border-emerald-400" },
+  { key: "booked", title: "Booked", color: "border-emerald-300 bg-emerald-50/50", hoverBg: "bg-emerald-100/70 border-emerald-400" },
   { key: "lost", title: "Lost / Closed", color: "border-gray-300 bg-gray-50/50", hoverBg: "bg-gray-100/70 border-gray-400" },
 ];
 
@@ -26,6 +27,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   onApproveLead,
   onDeleteLead,
   onResendTouch,
+  onRejectSequence,
 }) => {
   const [leads, setLeads] = useState<Lead[]>(initialLeads);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
@@ -67,6 +69,10 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
 
   const handleResend = (leadId: string) => {
     if (onResendTouch) onResendTouch(leadId);
+  };
+
+  const handleReject = (leadId: string) => {
+    if (onRejectSequence) onRejectSequence(leadId);
   };
 
   const handleDragOver = (e: React.DragEvent, colKey: ColumnKey) => {
@@ -151,6 +157,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
         onMoveStage={handleMoveStage}
         onDelete={handleDelete}
         onResend={handleResend}
+        onReject={handleReject}
       />
     </div>
   );

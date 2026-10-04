@@ -1,6 +1,9 @@
 import { sendGmailMessage } from "./gmail.service";
 import { CircuitBreaker } from "@/lib/circuit-breaker";
 import { isFeatureEnabled } from "@/lib/feature-flags";
+import { substituteTemplateVariables } from "./template-substitute";
+
+export { substituteTemplateVariables };
 
 export const whatsappCircuitBreaker = new CircuitBreaker({
   name: "WhatsAppCloudAPI",
@@ -52,9 +55,6 @@ export function isInside24HourWindow(lastInteractionAt: Date | null): boolean {
   const diffHours = (now - interactionTime) / (1000 * 60 * 60);
   return diffHours >= 0 && diffHours < 24;
 }
-
-import { substituteTemplateVariables } from "./template-substitute";
-export { substituteTemplateVariables };
 
 export class ChannelDispatcherService {
   /**

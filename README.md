@@ -11,7 +11,7 @@ ClientFollow automatically detects incoming leads across channels (Gmail, WhatsA
 - **Multi-Channel Lead Ingestion**: Seamless integration with Gmail (OAuth2 + Google Cloud Pub/Sub), Meta WhatsApp Business Cloud API, and generic JSON Inbound Webhooks.
 - **AI Intent Classification**: Automatic extraction of intent, requested service, urgency, and sentiment via OpenAI or local LLMs (Ollama / LM Studio).
 - **Durable Sequence Engine**: Powered by [Inngest](https://www.inngest.com/) for reliable multi-day follow-up cadences that pause for approval and automatically cancel on lead reply or booking.
-- **Human-in-the-Loop Approvals**: Review, edit, approve, or reject AI-drafted responses before dispatch.
+- **Human-in-the-Loop Approvals**: Review, edit, approve, or reject follow-up drafts — LLM-drafted when an `OPENAI_API_KEY` is configured, otherwise curated vertical templates — before dispatch.
 - **NIST SP 800-57 & FIPS 140-3 Encryption**: OAuth tokens and lead snippets are encrypted using AWS KMS envelope encryption (AES-256-GCM with tenant-bound AAD).
 - **Multi-Tenant Architecture**: Strict PostgreSQL Row Level Security (RLS) policies isolating tenant data per organization.
 - **Stripe Billing Integration**: Tiered subscription management (Starter, Growth, Pro) with webhook-driven seat and lead quota provisioning.

@@ -86,6 +86,30 @@ describe("LeadsRepository", () => {
     expect(created.id).toBe("lead_123");
   });
 
+  it("never inserts a client-supplied id (Postgres UUID is the source of truth)", async () => {
+    const mockInsert = vi.fn().mockReturnThis();
+    const mockSelect = vi.fn().mockReturnThis();
+    const mockSingle = vi.fn().mockResolvedValue({
+      data: { ...sampleLead, id: "uuid_generated_by_postgres" },
+      error: null,
+    });
+
+    mockSupabase.from.mockReturnValue({
+      insert: mockInsert,
+    });
+    mockInsert.mockReturnValue({
+      select: mockSelect,
+    });
+    mockSelect.mockReturnValue({
+      single: mockSingle,
+    });
+
+    await repository.createLead({ ...sampleLead, id: "lead_1712345678901" });
+
+    const insertedRow = mockInsert.mock.calls[0][0] as Record<string, unknown>;
+    expect(insertedRow).not.toHaveProperty("id");
+  });
+
   it("updates lead status with transition validation", async () => {
     const mockSingle = vi.fn().mockResolvedValue({
       data: { ...sampleLead, status: "contacted" },
