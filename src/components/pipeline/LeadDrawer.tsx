@@ -16,6 +16,7 @@ import {
   Plus,
 } from "lucide-react";
 import { Lead } from "@/lib/db/types";
+import { generateDraftFollowUpMessage } from "@/lib/services/approval.service";
 
 interface LeadDrawerProps {
   lead: Lead | null;
@@ -126,14 +127,14 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
                 <AlertCircle className="h-4 w-4 text-amber-600" />
                 <span>Follow-Up Draft Pending Approval</span>
               </div>
-              <p className="text-xs text-slate-700 italic bg-white p-3 rounded-lg border border-amber-100 leading-relaxed">
-                &ldquo;Hi {lead.name?.split(" ")[0] || "there"}, following up on your inquiry about {lead.detected_service || "our services"}. We have open slots this week if you&apos;d like to schedule a quick consultation.&rdquo;
+              <p className="text-xs text-slate-700 italic bg-white p-3 rounded-lg border border-amber-100 leading-relaxed font-sans">
+                &ldquo;{generateDraftFollowUpMessage(lead)}&rdquo;
               </p>
               <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={() => onApprove(lead.id || "")}
-                  className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                  className="flex-1 py-2 bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer"
                 >
                   Approve & Dispatch Now
                 </button>
@@ -163,6 +164,7 @@ export const LeadDrawer: React.FC<LeadDrawerProps> = ({
               onClick={handleDeleteClick}
               className="p-2 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-lg text-xs transition-colors cursor-pointer"
               title="Delete lead permanently"
+              aria-label="Delete lead permanently"
             >
               <Trash2 className="h-4 w-4" />
             </button>

@@ -1,6 +1,15 @@
 import Stripe from "stripe";
 import { TIER_CONFIGS } from "./usage.service";
 import { env } from "@/lib/env";
+import { CircuitBreaker } from "@/lib/circuit-breaker";
+import { isFeatureEnabled } from "@/lib/feature-flags";
+
+export const stripeCircuitBreaker = new CircuitBreaker({
+  name: "StripeBillingAPI",
+  failureThreshold: 3,
+  recoveryTimeoutMs: 30_000,
+  timeoutMs: 10_000,
+});
 
 export const STRIPE_TIER_PRICES: Record<string, string> = {
   starter: env.STRIPE_PRICE_STARTER,
@@ -70,12 +79,19 @@ export async function createStripeCheckoutSession(
 ): Promise<{ sessionId: string; url: string | null }> {
   const stripe = stripeClient || getStripeClient();
   const options = buildCheckoutSessionOptions(params);
-  const session = await stripe.checkout.sessions.create(options);
 
-  return {
-    sessionId: session.id,
-    url: session.url,
+  const executeCall = async () => {
+    const session = await stripe.checkout.sessions.create(options);
+    return {
+      sessionId: session.id,
+      url: session.url,
+    };
   };
+
+  if (isFeatureEnabled("circuit_breaker_enabled")) {
+    return stripeCircuitBreaker.execute(executeCall);
+  }
+  return executeCall();
 }
 
 /**
@@ -104,12 +120,13 @@ export function processStripeWebhookEvent(
 ): StripeWebhookResult {
   const ev = event as { type?: string; data?: { object?: Record<string, unknown> } };
   const type = ev?.type;
-  const obj = ev?.data?.object as Record<string, any> | undefined;
+  const obj = ev?.data?.object;
+  const metadata = (obj?.metadata && typeof obj.metadata === "object" ? obj.metadata : {}) as Record<string, string>;
 
   switch (type) {
     case "checkout.session.completed": {
-      const orgId = obj?.metadata?.org_id || null;
-      const planTier = obj?.metadata?.plan_tier || "starter";
+      const orgId = metadata.org_id || null;
+      const planTier = metadata.plan_tier || "starter";
       const config = TIER_CONFIGS[planTier] || TIER_CONFIGS.starter;
 
       return {
@@ -117,13 +134,13 @@ export function processStripeWebhookEvent(
         subscriptionStatus: "active",
         planTier,
         activeLeadsLimit: config.activeLeadsLimit,
-        stripeCustomerId: obj?.customer,
-        stripeSubscriptionId: obj?.subscription,
+        stripeCustomerId: typeof obj?.customer === "string" ? obj.customer : undefined,
+        stripeSubscriptionId: typeof obj?.subscription === "string" ? obj.subscription : undefined,
       };
     }
 
     case "customer.subscription.deleted": {
-      const orgId = obj?.metadata?.org_id || null;
+      const orgId = metadata.org_id || null;
       return {
         orgId,
         subscriptionStatus: "canceled",
@@ -132,9 +149,9 @@ export function processStripeWebhookEvent(
     }
 
     case "customer.subscription.updated": {
-      const orgId = obj?.metadata?.org_id || null;
+      const orgId = metadata.org_id || null;
       const status = obj?.status === "active" ? "active" : "past_due";
-      const planTier = obj?.metadata?.plan_tier || "starter";
+      const planTier = metadata.plan_tier || "starter";
       const config = TIER_CONFIGS[planTier] || TIER_CONFIGS.starter;
 
       return {

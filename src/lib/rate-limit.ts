@@ -14,19 +14,28 @@ export interface RateLimitResult {
   resetInSeconds: number;
 }
 
-// In-memory store for rate limiting with automatic pruning
+// In-memory store for rate limiting with automatic pruning and size caps
 const store = new Map<string, RateLimitRecord>();
 let lastPruned = Date.now();
 const PRUNE_INTERVAL_MS = 60 * 1000; // 1 minute
+const MAX_STORE_SIZE = 10_000;
 
 function pruneExpiredEntries(): void {
   const now = Date.now();
-  if (now - lastPruned < PRUNE_INTERVAL_MS) return;
+  if (now - lastPruned < PRUNE_INTERVAL_MS && store.size < MAX_STORE_SIZE) return;
   lastPruned = now;
 
   for (const [key, record] of store.entries()) {
     if (record.resetAt <= now) {
       store.delete(key);
+    }
+  }
+
+  // If still at or exceeding capacity, evict the oldest entries to preserve bounded memory
+  if (store.size >= MAX_STORE_SIZE) {
+    const keysToEvict = Array.from(store.keys()).slice(0, Math.floor(MAX_STORE_SIZE * 0.2));
+    for (const k of keysToEvict) {
+      store.delete(k);
     }
   }
 }

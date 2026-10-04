@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { Lead } from "@/lib/db/types";
 import { approveLeadSequence, rejectLeadSequence } from "@/app/actions/approval";
-import { filterPendingApprovals } from "@/lib/services/approval.service";
+import { filterPendingApprovals, generateDraftFollowUpMessage } from "@/lib/services/approval.service";
 
 interface ApprovalQueueProps {
   initialLeads: Lead[];
@@ -31,22 +31,22 @@ export function ApprovalQueue({ initialLeads }: ApprovalQueueProps) {
   const pendingLeads = filterPendingApprovals(leads);
 
   const getDefaultMessage = (lead: Lead) => {
-    return (
-      (lead.id && editedMessages[lead.id]) ||
-      `Hi ${lead.name || "there"}, following up regarding your inquiry for ${
-        lead.detected_service || "our services"
-      }. Would you like to schedule a quick consultation this week?`
-    );
+    if (lead.id && editedMessages[lead.id]) {
+      return editedMessages[lead.id];
+    }
+    return generateDraftFollowUpMessage(lead);
   };
 
   const handleApprove = async (leadId: string) => {
     setProcessingId(leadId);
     setActionFeedback(null);
     try {
-      const message = editedMessages[leadId];
+      const targetLead = leads.find((l) => l.id === leadId);
+      const message = editedMessages[leadId] || (targetLead ? getDefaultMessage(targetLead) : undefined);
       const res = await approveLeadSequence({
         leadId,
         stepId: "step_1",
+        stepNumber: 1,
         editedMessage: message,
       });
 
@@ -112,7 +112,7 @@ export function ApprovalQueue({ initialLeads }: ApprovalQueueProps) {
       </div>
 
       {/* AI Regulatory & Human-in-the-Loop Advisory */}
-      <div className="rounded-xl bg-blue-50/80 border border-blue-200 px-4 py-3 text-xs text-blue-900 flex items-start gap-3 shadow-xs">
+      <div className="rounded-xl bg-blue-50/80 border border-blue-200 px-4 py-3 text-xs text-blue-900 flex items-start gap-3 shadow-sm">
         <Sparkles className="h-4 w-4 text-blue-600 flex-shrink-0 mt-0.5" />
         <div className="space-y-0.5">
           <span className="font-semibold text-blue-950">AI Human-in-the-Loop Notice:</span>{" "}

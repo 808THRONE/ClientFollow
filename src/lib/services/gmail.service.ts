@@ -3,6 +3,15 @@
  * Handles OAuth2 consent flow, token exchange/refresh, outbound email dispatch,
  * and incoming Gmail push notification decoding.
  */
+import { CircuitBreaker } from "@/lib/circuit-breaker";
+import { isFeatureEnabled } from "@/lib/feature-flags";
+
+export const gmailCircuitBreaker = new CircuitBreaker({
+  name: "GmailRESTAPI",
+  failureThreshold: 3,
+  recoveryTimeoutMs: 30_000,
+  timeoutMs: 10_000,
+});
 
 export interface GoogleAuthOptions {
   clientId: string;
@@ -157,26 +166,33 @@ export async function sendGmailMessage(
     bodyPayload.threadId = params.threadId;
   }
 
-  const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify(bodyPayload),
-    signal: AbortSignal.timeout(10000),
-  });
+  const executeCall = async () => {
+    const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(bodyPayload),
+      signal: AbortSignal.timeout(10000),
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gmail API send failed (HTTP ${response.status}): ${errorText}`);
-  }
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gmail API send failed (HTTP ${response.status}): ${errorText}`);
+    }
 
-  const data = await response.json();
-  return {
-    messageId: data.id,
-    threadId: data.threadId,
+    const data = await response.json();
+    return {
+      messageId: data.id,
+      threadId: data.threadId,
+    };
   };
+
+  if (isFeatureEnabled("circuit_breaker_enabled")) {
+    return gmailCircuitBreaker.execute(executeCall);
+  }
+  return executeCall();
 }
 
 /**

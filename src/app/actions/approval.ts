@@ -1,11 +1,14 @@
 "use server";
 
 import { inngest } from "@/inngest/client";
+import { getSessionAction } from "./session";
 
 export interface ApproveSequenceInput {
   leadId: string;
   stepId?: string;
+  stepNumber?: number;
   editedMessage?: string;
+  approvedBy?: string;
 }
 
 export interface RejectSequenceInput {
@@ -22,11 +25,16 @@ export async function approveLeadSequence(input: ApproveSequenceInput) {
   }
 
   try {
+    const session = await getSessionAction();
+    const effectiveApprover = input.approvedBy || session?.email || "system_operator";
+
     await inngest.send({
       name: "app/sequence.approved",
       data: {
         lead_id: input.leadId,
         step_id: input.stepId || "step_1",
+        step_number: input.stepNumber || 1,
+        approved_by: effectiveApprover,
         approved_message: input.editedMessage,
       },
     });

@@ -30,8 +30,12 @@ export async function destroySessionAction() {
  * Server action: Get current session payload (if valid).
  */
 export async function getSessionAction(): Promise<Record<string, string> | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
-  return verifyToken(token);
+  try {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(SESSION_COOKIE)?.value;
+    if (!token) return null;
+    return verifyToken(token);
+  } catch {
+    return null;
+  }
 }

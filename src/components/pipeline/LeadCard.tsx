@@ -7,9 +7,10 @@ interface LeadCardProps {
   lead: Lead;
   onSelectLead: (lead: Lead) => void;
   onApprove?: (leadId: string) => void;
+  onMoveStage?: (leadId: string, newStatus: string) => void;
 }
 
-export const LeadCard: React.FC<LeadCardProps> = ({ lead, onSelectLead, onApprove }) => {
+export const LeadCard: React.FC<LeadCardProps> = ({ lead, onSelectLead, onApprove, onMoveStage }) => {
   const badge = formatLeadBadge(lead);
 
   const badgeColors = {
@@ -84,6 +85,28 @@ export const LeadCard: React.FC<LeadCardProps> = ({ lead, onSelectLead, onApprov
           </span>
         )}
       </div>
+
+      {onMoveStage && (
+        <div className="flex md:hidden items-center justify-between mt-2 pt-2 border-t border-slate-100">
+          <span className="text-[10px] text-slate-400 font-medium">Stage:</span>
+          <select
+            value={lead.status}
+            onChange={(e) => {
+              e.stopPropagation();
+              onMoveStage(lead.id || "", e.target.value);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            className="text-[10px] font-semibold bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 text-slate-700 focus:outline-none"
+            aria-label={`Change stage for ${lead.name || "lead"}`}
+          >
+            <option value="new_lead">New Lead</option>
+            <option value="contacted">Contacted</option>
+            <option value="replied">Replied</option>
+            <option value="booked">Booked 🎉</option>
+            <option value="lost">Lost</option>
+          </select>
+        </div>
+      )}
     </div>
   );
 };

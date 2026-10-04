@@ -12,11 +12,18 @@ const LOGIN_RATE_LIMIT_OPTIONS = {
 };
 
 function getClientIp(req: NextRequest): string {
+  // Prefer platform-verified IP headers that cannot be spoofed by downstream clients
+  const vercelIp = req.headers.get("x-vercel-ip");
+  if (vercelIp?.trim()) return vercelIp.trim();
+
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp?.trim()) return realIp.trim();
+
   const forwarded = req.headers.get("x-forwarded-for");
   if (forwarded) {
     return forwarded.split(",")[0].trim();
   }
-  return req.headers.get("x-real-ip") || "127.0.0.1";
+  return "127.0.0.1";
 }
 
 /**
@@ -60,10 +67,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const isDemoEmail = email.includes("demo") || email.includes("admin") || email.includes("test");
-
-    // In production with live Supabase, verify password against Supabase Auth
-    if (env.isProduction && !isDemoEmail) {
+    // In production, strictly require password for all emails without backdoor exceptions
+    if (env.isProduction) {
       if (!password) {
         return NextResponse.json(
           { success: false, error: "Password is required" },
@@ -85,6 +90,32 @@ export async function POST(req: NextRequest) {
             ip,
             error: authError.message,
           });
+          return NextResponse.json(
+            { success: false, error: "Invalid email or password" },
+            { status: 401 }
+          );
+        }
+      } else {
+        // Fail closed in production if auth backend is not configured
+        logger.error("Authentication backend unavailable in production", {
+          service: "AuthLogin",
+          email,
+        });
+        return NextResponse.json(
+          { success: false, error: "Authentication service unavailable" },
+          { status: 503 }
+        );
+      }
+    } else {
+      // In development / test environment: if Supabase is live and password provided, verify it
+      if (env.isSupabaseLive && password) {
+        const supabase = createServerSupabaseClient();
+        const { error: authError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (authError) {
           return NextResponse.json(
             { success: false, error: "Invalid email or password" },
             { status: 401 }

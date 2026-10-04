@@ -212,7 +212,7 @@ export function SettingsHub() {
             <div className="pt-2">
               <button
                 type="submit"
-                className="py-2.5 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                className="py-2.5 px-5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer"
               >
                 Save Notification Preferences
               </button>
@@ -279,7 +279,7 @@ export function SettingsHub() {
                 type="button"
                 onClick={handleTestInboundWebhook}
                 disabled={simLoading}
-                className="py-2.5 px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-xs flex items-center gap-2 cursor-pointer disabled:opacity-70"
+                className="py-2.5 px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold shadow-sm flex items-center gap-2 cursor-pointer disabled:opacity-70"
               >
                 <Play className="h-3.5 w-3.5 fill-current" />
                 <span>{simLoading ? "Simulating Webhook Intake..." : "Simulate Inbound Webhook Call"}</span>

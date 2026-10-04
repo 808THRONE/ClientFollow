@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { processStripeWebhookEvent, verifyStripeWebhookSignature } from "@/lib/services/stripe.service";
 import { createServerSupabaseClient } from "@/lib/db/client";
+import { idempotencyService } from "@/lib/services/idempotency.service";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 
@@ -41,6 +42,15 @@ export async function POST(req: NextRequest) {
 
     // Process mapped event results
     const result = processStripeWebhookEvent(event);
+
+    // Enforce idempotency: prevent processing duplicate events
+    if (event?.id && (await idempotencyService.isEventProcessed(event.id))) {
+      logger.info("Stripe webhook duplicate event ignored", {
+        service: "StripeWebhook",
+        eventId: event.id,
+      });
+      return NextResponse.json({ success: true, duplicate: true, received: true });
+    }
 
     if (result.orgId) {
       if (env.isSupabaseLive) {
@@ -92,11 +102,22 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      if (event?.id) {
+        await idempotencyService.markEventProcessed(event.id, {
+          type: event.type,
+          orgId: result.orgId,
+        });
+      }
+
       return NextResponse.json({
         success: true,
         updatedOrgId: result.orgId,
         status: result.subscriptionStatus,
       });
+    }
+
+    if (event?.id) {
+      await idempotencyService.markEventProcessed(event.id, { type: event.type });
     }
 
     return NextResponse.json({ success: true, received: true, unhandledType: event?.type });

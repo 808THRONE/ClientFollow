@@ -2,7 +2,6 @@ import { inngest } from "@/inngest/client";
 import { createServerSupabaseClient } from "@/lib/db/client";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
-import { PlaybookStep } from "@/lib/db/types";
 
 export interface CadenceExecutionStep {
   stepNumber: number;
@@ -69,6 +68,7 @@ export const followUpCadence = inngest.createFunction(
     cancelOn: [
       { event: "app/lead.replied", match: "data.lead_id" },
       { event: "app/lead.booked", match: "data.lead_id" },
+      { event: "app/sequence.rejected", match: "data.lead_id" },
     ],
   },
   { event: "app/lead.detected" },
@@ -82,6 +82,30 @@ export const followUpCadence = inngest.createFunction(
       requiresApproval: !!requires_approval,
     });
 
+    // Initialize or record follow_up_runs for DB-side observability (A12)
+    if (env.isSupabaseLive) {
+      await step.run("record-follow-up-init", async () => {
+        try {
+          const supabase = createServerSupabaseClient();
+          await supabase.from("follow_up_runs").insert({
+            lead_id,
+            org_id,
+            current_step: 1,
+            status: plan.requiresApproval ? "paused_for_approval" : "running",
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn("Non-fatal: could not write initial follow_up_runs", {
+            service: "FollowUpCadence",
+            leadId: lead_id,
+            error: msg,
+          });
+        }
+      });
+    }
+
     for (const action of plan.steps) {
       // 1. Wait for delay interval
       if (action.delayHours > 0) {
@@ -90,11 +114,53 @@ export const followUpCadence = inngest.createFunction(
 
       // 2. If approval is required, wait for human review event
       if (plan.requiresApproval) {
-        await step.waitForEvent(`wait-for-human-approval-${action.stepNumber}`, {
+        const approval = await step.waitForEvent(`wait-for-human-approval-${action.stepNumber}`, {
           event: "app/sequence.approved",
           timeout: "5d",
           match: "data.lead_id",
         });
+
+        // B14: Handle approval timeout gracefully to prevent unapproved dispatches
+        if (!approval) {
+          logger.warn("Cadence approval timed out after 5 days; marking lead unapproved and lost", {
+            service: "FollowUpCadence",
+            leadId: lead_id,
+            stepNumber: action.stepNumber,
+          });
+
+          if (env.isSupabaseLive) {
+            await step.run(`handle-approval-timeout-${action.stepNumber}`, async () => {
+              try {
+                const supabase = createServerSupabaseClient();
+                await supabase
+                  .from("leads")
+                  .update({
+                    approval_pending: false,
+                    status: "lost",
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", lead_id);
+
+                await supabase
+                  .from("follow_up_runs")
+                  .update({
+                    status: "completed",
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("lead_id", lead_id);
+              } catch (err: unknown) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logger.warn("Failed to update status on approval timeout", {
+                  service: "FollowUpCadence",
+                  leadId: lead_id,
+                  error: msg,
+                });
+              }
+            });
+          }
+
+          return { completed: false, aborted: true, reason: "approval_timeout", leadId: lead_id };
+        }
 
         // Reset approval_pending flag in DB once approval is granted
         if (env.isSupabaseLive) {
@@ -157,6 +223,20 @@ export const followUpCadence = inngest.createFunction(
             leadId: lead_id,
             status: leadStatus,
           });
+          if (env.isSupabaseLive) {
+            try {
+              const supabase = createServerSupabaseClient();
+              await supabase
+                .from("follow_up_runs")
+                .update({
+                  status: leadStatus === "replied" ? "cancelled_by_reply" : "cancelled_by_booking",
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("lead_id", lead_id);
+            } catch {
+              // Non-fatal audit log update failure
+            }
+          }
           return { aborted: true, reason: `lead status is ${leadStatus}` };
         }
 
@@ -182,6 +262,15 @@ export const followUpCadence = inngest.createFunction(
               });
               throw new Error(`Database error advancing lead status: ${updateErr.message}`);
             }
+
+            await supabase
+              .from("follow_up_runs")
+              .update({
+                current_step: action.stepNumber,
+                status: "running",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("lead_id", lead_id);
           } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : String(err);
             logger.error("Database error during status advancement", {
@@ -237,6 +326,74 @@ export const followUpCadence = inngest.createFunction(
       return { status: "lost", leadId: lead_id, closedAt: new Date().toISOString() };
     });
 
+    if (env.isSupabaseLive) {
+      await step.run("record-cadence-completed", async () => {
+        try {
+          const supabase = createServerSupabaseClient();
+          await supabase
+            .from("follow_up_runs")
+            .update({ status: "completed", updated_at: new Date().toISOString() })
+            .eq("lead_id", lead_id);
+        } catch {
+          // non-fatal
+        }
+      });
+    }
+
     return { completed: true, leadId: lead_id };
   }
 );
+
+/**
+ * Handles explicit sequence rejection by an operator.
+ * Cancels active cadence, resets approval_pending, and logs rejection reason.
+ */
+export const handleSequenceRejection = inngest.createFunction(
+  {
+    id: "handle-sequence-rejection",
+    name: "Handle Sequence Rejection and Cancellation",
+  },
+  { event: "app/sequence.rejected" },
+  async ({ event, step }) => {
+    const { lead_id, reason } = event.data;
+
+    await step.run("clear-approval-on-rejection", async () => {
+      if (env.isSupabaseLive) {
+        try {
+          const supabase = createServerSupabaseClient();
+          await supabase
+            .from("leads")
+            .update({
+              approval_pending: false,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", lead_id);
+
+          await supabase
+            .from("follow_up_runs")
+            .update({
+              status: "completed",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("lead_id", lead_id);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          logger.warn("Failed to clear approval_pending on sequence rejection", {
+            service: "FollowUpCadence",
+            leadId: lead_id,
+            error: msg,
+          });
+        }
+      }
+
+      logger.info("Sequence rejected and cadence cancelled", {
+        service: "FollowUpCadence",
+        leadId: lead_id,
+        reason: reason || "Operator rejected follow-up",
+      });
+
+      return { leadId: lead_id, rejected: true, reason };
+    });
+  }
+);
+

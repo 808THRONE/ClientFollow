@@ -132,6 +132,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                       lead={lead}
                       onSelectLead={setSelectedLead}
                       onApprove={handleApprove}
+                      onMoveStage={handleMoveStage}
                     />
                   ))
                 )}

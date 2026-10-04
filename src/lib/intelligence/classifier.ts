@@ -1,5 +1,14 @@
 import { z } from "zod";
 import { env } from "@/lib/env";
+import { CircuitBreaker } from "@/lib/circuit-breaker";
+import { isFeatureEnabled } from "@/lib/feature-flags";
+
+export const aiCircuitBreaker = new CircuitBreaker({
+  name: "OpenAIClassifier",
+  failureThreshold: 3,
+  recoveryTimeoutMs: 20_000,
+  timeoutMs: 8_000,
+});
 
 export const LeadClassificationSchema = z.object({
   is_lead: z.boolean().describe("True if sender is inquiring about services, quotes, or bookings"),
@@ -76,6 +85,11 @@ export async function classifyLeadIntent(
     };
   }
 
+  // Fast-path: If AI intent classifier is toggled off, immediately use deterministic rule engine
+  if (!isFeatureEnabled("ai_intent_classifier")) {
+    return ruleBasedFallback(sanitized, options.industry);
+  }
+
   const rawBaseUrl = options.baseUrl || env.OPENAI_BASE_URL || "https://api.openai.com/v1";
   const baseUrl = rawBaseUrl.replace(/\/+$/, "");
   const isLocalEndpoint = baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1") || baseUrl.includes("ollama");
@@ -84,11 +98,12 @@ export async function classifyLeadIntent(
   const model = options.model || env.OPENAI_MODEL || (isLocalEndpoint ? "llama3.2" : "gpt-4o-mini");
 
   if (apiKey) {
-    try {
+    const executeLLM = async (): Promise<LeadClassification> => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 8000);
 
-      const systemPrompt = `You are an expert sales lead classification assistant for a ${options.industry || "service"} business.
+      try {
+        const systemPrompt = `You are an expert sales lead classification assistant for a ${options.industry || "service"} business.
 Analyze the inbound communication from a prospective customer and output a strictly valid JSON object matching this schema:
 {
   "is_lead": boolean,
@@ -100,37 +115,50 @@ Analyze the inbound communication from a prospective customer and output a stric
   "confidence_score": float between 0.0 and 1.0
 }`;
 
-      const endpoint = `${baseUrl}/chat/completions`;
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: sanitized },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.1,
-        }),
-        signal: controller.signal,
-      });
+        const endpoint = `${baseUrl}/chat/completions`;
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: sanitized },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.1,
+          }),
+          signal: controller.signal,
+        });
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (response.ok) {
-        const data = await response.json();
-        const content = data.choices?.[0]?.message?.content;
-        if (content) {
-          return parseLeadIntentFromLLM(content);
+        if (response.ok) {
+          const data = await response.json();
+          const content = data.choices?.[0]?.message?.content;
+          if (content) {
+            return parseLeadIntentFromLLM(content);
+          }
         }
-      } else {
         const errorText = await response.text();
-        console.warn(`[AI Classifier] OpenAI API returned HTTP ${response.status}: ${errorText}. Using deterministic fallback.`);
+        throw new Error(`OpenAI API returned HTTP ${response.status}: ${errorText}`);
+      } catch (err: unknown) {
+        clearTimeout(timeoutId);
+        throw err;
       }
+    };
+
+    try {
+      if (isFeatureEnabled("circuit_breaker_enabled")) {
+        return await aiCircuitBreaker.execute(
+          executeLLM,
+          () => ruleBasedFallback(sanitized, options.industry)
+        );
+      }
+      return await executeLLM();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[AI Classifier] Network error during AI classification: ${msg}. Falling back to deterministic analysis.`);

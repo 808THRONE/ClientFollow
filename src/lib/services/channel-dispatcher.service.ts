@@ -1,4 +1,13 @@
 import { sendGmailMessage } from "./gmail.service";
+import { CircuitBreaker } from "@/lib/circuit-breaker";
+import { isFeatureEnabled } from "@/lib/feature-flags";
+
+export const whatsappCircuitBreaker = new CircuitBreaker({
+  name: "WhatsAppCloudAPI",
+  failureThreshold: 3,
+  recoveryTimeoutMs: 30_000,
+  timeoutMs: 10_000,
+});
 
 export interface WhatsAppTemplateParameter {
   type: "text";
@@ -44,35 +53,8 @@ export function isInside24HourWindow(lastInteractionAt: Date | null): boolean {
   return diffHours >= 0 && diffHours < 24;
 }
 
-/**
- * Substitutes variables into templates. Supports named placeholders (e.g. {{first_name}}, {{service}}, {{booking_link}})
- * as well as legacy positional placeholders ({{1}}, {{2}}, {{3}}).
- */
-export function substituteTemplateVariables(
-  templateText: string,
-  vars: Record<string, string | number | undefined> & {
-    first_name?: string;
-    service?: string;
-    booking_link?: string;
-  }
-): string {
-  const firstName = String(vars.first_name ?? "").trim() || "there";
-  const service = String(vars.service ?? "").trim() || "our services";
-  const bookingLink = String(vars.booking_link ?? "").trim();
-
-  let result = templateText
-    .replace(/\{\{(?:1|first_name|name)\}\}/gi, firstName)
-    .replace(/\{\{(?:2|service)\}\}/gi, service)
-    .replace(/\{\{(?:3|booking_link)\}\}/gi, bookingLink);
-
-  for (const [key, val] of Object.entries(vars)) {
-    if (val !== undefined && val !== null) {
-      result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, "gi"), String(val));
-    }
-  }
-
-  return result;
-}
+import { substituteTemplateVariables } from "./template-substitute";
+export { substituteTemplateVariables };
 
 export class ChannelDispatcherService {
   /**
@@ -129,24 +111,36 @@ export class ChannelDispatcherService {
       throw new Error("apiToken and phoneNumberId are required for WhatsApp dispatch");
     }
 
-    const url = `https://graph.facebook.com/v21.0/${params.phoneNumberId}/messages`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${params.apiToken}`,
-      },
-      body: JSON.stringify(params.payload),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`WhatsApp Cloud API dispatch failed (HTTP ${response.status}): ${errorText}`);
+    if (!isFeatureEnabled("whatsapp_integration")) {
+      throw new Error("WhatsApp integration feature is currently disabled");
     }
 
-    const data = await response.json();
-    const messageId = data?.messages?.[0]?.id || `wamid_${Date.now()}`;
-    return { messageId };
+    const executeCall = async () => {
+      const url = `https://graph.facebook.com/v21.0/${params.phoneNumberId}/messages`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${params.apiToken}`,
+        },
+        body: JSON.stringify(params.payload),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`WhatsApp Cloud API dispatch failed (HTTP ${response.status}): ${errorText}`);
+      }
+
+      const data = await response.json();
+      const messageId = data?.messages?.[0]?.id || `wamid_${Date.now()}`;
+      return { messageId };
+    };
+
+    if (isFeatureEnabled("circuit_breaker_enabled")) {
+      return whatsappCircuitBreaker.execute(executeCall);
+    }
+    return executeCall();
   }
 
   /**

@@ -1,5 +1,6 @@
 "use server";
 
+import crypto from "node:crypto";
 import { canTransitionStatus, PipelineStatus } from "@/lib/services/pipeline-state.service";
 import { inngest } from "@/inngest/client";
 import { getPlaybookForIndustry } from "@/lib/services/playbook.service";
@@ -10,9 +11,21 @@ import { Lead } from "@/lib/db/types";
 import { logger } from "@/lib/logger";
 import { env } from "@/lib/env";
 import { DEMO_LEADS } from "@/lib/demo-data";
+import { getSessionAction } from "./session";
 
 function getLeadsRepo(): LeadsRepository {
   return new LeadsRepository(createServerSupabaseClient());
+}
+
+/**
+ * Resolves the authenticated user's organization ID from session or falls back securely.
+ */
+async function resolveEffectiveOrgId(passedOrgId?: string): Promise<string> {
+  const session = await getSessionAction();
+  if (session?.orgId) {
+    return session.orgId;
+  }
+  return passedOrgId || "org_demo";
 }
 
 /**
@@ -22,7 +35,7 @@ export async function updateLeadStatusAction(
   leadId: string,
   targetStatus: PipelineStatus,
   currentStatus: PipelineStatus,
-  orgId: string = "org_apex_dental"
+  orgId?: string
 ): Promise<{ success: boolean; newStatus?: PipelineStatus; error?: string }> {
   const isAllowed = canTransitionStatus(currentStatus, targetStatus);
 
@@ -33,20 +46,21 @@ export async function updateLeadStatusAction(
     };
   }
 
-  if (!orgId) {
+  const effectiveOrgId = await resolveEffectiveOrgId(orgId);
+  if (!effectiveOrgId) {
     return { success: false, error: "orgId is required" };
   }
 
   if (env.isSupabaseLive) {
     try {
       const leadsRepo = getLeadsRepo();
-      await leadsRepo.updateLeadStatus(leadId, orgId, targetStatus);
+      await leadsRepo.updateLeadStatus(leadId, effectiveOrgId, targetStatus);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error("Failed to update lead status", {
         service: "LeadsAction",
         leadId,
-        orgId,
+        orgId: effectiveOrgId,
         targetStatus,
         error: msg,
       });
@@ -67,20 +81,21 @@ export async function updateLeadStatusAction(
  * Server action to fetch leads for an organization.
  */
 export async function getLeadsAction(
-  orgId: string = "org_apex_dental"
+  orgId?: string
 ): Promise<{ success: boolean; leads: Lead[]; error?: string }> {
-  if (!orgId) {
+  const effectiveOrgId = await resolveEffectiveOrgId(orgId);
+  if (!effectiveOrgId) {
     return { success: false, leads: [], error: "orgId is required" };
   }
 
   if (env.isSupabaseLive) {
     try {
       const leadsRepo = getLeadsRepo();
-      const leads = await leadsRepo.getLeadsByOrg(orgId);
+      const leads = await leadsRepo.getLeadsByOrg(effectiveOrgId);
       return { success: true, leads };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("Failed to fetch leads", { service: "LeadsAction", orgId, error: msg });
+      logger.error("Failed to fetch leads", { service: "LeadsAction", orgId: effectiveOrgId, error: msg });
       return { success: false, leads: [], error: msg };
     }
   }
@@ -122,7 +137,27 @@ export async function createLeadAction(
       };
     }
 
-    const playbook = getPlaybookForIndustry(created.detected_service || "general");
+    let industryToUse = "general";
+    if (env.isSupabaseLive) {
+      try {
+        const supabase = createServerSupabaseClient();
+        const { data: orgData } = await supabase
+          .from("organizations")
+          .select("industry")
+          .eq("id", created.org_id)
+          .single();
+        if (orgData?.industry) {
+          industryToUse = orgData.industry;
+        }
+      } catch {
+        // Fallback to detected service mapping
+      }
+    }
+    if (industryToUse === "general" && created.detected_service) {
+      industryToUse = created.detected_service;
+    }
+
+    const playbook = getPlaybookForIndustry(industryToUse);
 
     // Fire Inngest event with configured playbook steps
     await inngest.send({
@@ -148,20 +183,28 @@ export async function createLeadAction(
  * Server action to approve a pending follow-up message draft.
  */
 export async function approveDraftAction(
-  leadId: string
+  leadId: string,
+  options?: {
+    stepId?: string;
+    stepNumber?: number;
+    approvedBy?: string;
+    approvedMessage?: string;
+  }
 ): Promise<{ success: boolean; error?: string }> {
   if (!leadId) {
     return { success: false, error: "leadId is required" };
   }
 
   try {
-    // Dispatch Inngest approval event to release the workflow step lock
+    // Dispatch canonical Inngest approval event to release the workflow step lock
     await inngest.send({
       name: "app/sequence.approved",
       data: {
         lead_id: leadId,
-        approved_by: "system_operator",
-        step_number: 1,
+        step_id: options?.stepId || "step_1",
+        step_number: options?.stepNumber || 1,
+        approved_by: options?.approvedBy || "system_operator",
+        approved_message: options?.approvedMessage,
       },
     });
 
@@ -277,19 +320,21 @@ export async function enrollScannedLeadsAction(
  */
 export async function deleteLeadAction(
   leadId: string,
-  orgId: string = "org_apex_dental"
+  orgId?: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!leadId) {
     return { success: false, error: "leadId is required" };
   }
 
+  const effectiveOrgId = await resolveEffectiveOrgId(orgId);
+
   if (env.isSupabaseLive) {
     try {
       const leadsRepo = getLeadsRepo();
-      await leadsRepo.deleteLead(leadId, orgId);
+      await leadsRepo.deleteLead(leadId, effectiveOrgId);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      logger.error("Failed to delete lead", { service: "LeadsAction", leadId, orgId, error: msg });
+      logger.error("Failed to delete lead", { service: "LeadsAction", leadId, orgId: effectiveOrgId, error: msg });
       return { success: false, error: msg };
     }
   }
@@ -302,11 +347,13 @@ export async function deleteLeadAction(
  */
 export async function resendFollowUpAction(
   leadId: string,
-  orgId: string = "org_apex_dental"
+  orgId?: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!leadId) {
     return { success: false, error: "leadId is required" };
   }
+
+  await resolveEffectiveOrgId(orgId);
 
   try {
     await inngest.send({

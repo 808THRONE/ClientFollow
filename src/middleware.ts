@@ -20,7 +20,6 @@ const PUBLIC_PATHS = [
   "/api/webhooks/calendar",
   "/api/webhooks/stripe",
   "/api/webhooks/inbound",
-  "/api/checkout",
   "/api/auth/session",
   "/api/auth/login",
   "/api/health",
@@ -42,7 +41,7 @@ function isPublicPath(pathname: string): boolean {
 }
 
 /**
- * Attaches comprehensive production security headers and correlation ID to all HTTP responses (S7).
+ * Attaches comprehensive production security headers and correlation ID to all HTTP responses (S7, S9, S10).
  */
 function applySecurityHeaders(response: NextResponse, correlationId: string): NextResponse {
   response.headers.set("X-Frame-Options", "DENY");
@@ -58,10 +57,10 @@ function applySecurityHeaders(response: NextResponse, correlationId: string): Ne
 
   const cspHeader = [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com",
-    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline' https://js.stripe.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "img-src 'self' data: blob: https:",
-    "font-src 'self' data:",
+    "font-src 'self' data: https://fonts.gstatic.com",
     "connect-src 'self' https://*.supabase.co https://api.stripe.com https://*.inngest.com",
     "frame-src 'self' https://js.stripe.com",
     "object-src 'none'",
@@ -150,7 +149,7 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options as any)
+            supabaseResponse.cookies.set(name, value, options as Parameters<typeof supabaseResponse.cookies.set>[2])
           );
         },
       },

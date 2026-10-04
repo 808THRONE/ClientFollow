@@ -25,9 +25,12 @@ import {
   deleteLeadAction,
   resendFollowUpAction,
 } from "@/app/actions/leads";
+import { getSessionAction } from "@/app/actions/session";
+import { estimateLeadValue } from "@/lib/services/lead-valuation";
 
 export default function DashboardPage() {
   const [leads, setLeads] = useState<Lead[]>(DEMO_LEADS);
+  const [currentOrgId, setCurrentOrgId] = useState<string>("org_apex_dental");
   const [searchQuery, setSearchQuery] = useState("");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [notification, setNotification] = useState<string | null>(null);
@@ -36,7 +39,13 @@ export default function DashboardPage() {
     let isMounted = true;
     async function loadData() {
       try {
-        const res = await getLeadsAction("org_apex_dental");
+        const session = await getSessionAction();
+        const orgId = session?.orgId || "org_apex_dental";
+        if (isMounted) {
+          setCurrentOrgId(orgId);
+        }
+
+        const res = await getLeadsAction(orgId);
         if (isMounted && res.success && res.leads && res.leads.length > 0) {
           setLeads(res.leads);
         }
@@ -64,10 +73,12 @@ export default function DashboardPage() {
     setLeads((prev) =>
       prev.map((l) => (l.id === leadId ? { ...l, status: targetStatus } : l))
     );
-    showNotification(`Lead moved to ${newStatus.replace("_", " ").toUpperCase()}`);
+    const formatStatus = (s: string) =>
+      s.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    showNotification(`Lead moved to ${formatStatus(newStatus)}`);
 
     try {
-      const res = await updateLeadStatusAction(leadId, targetStatus, oldStatus, "org_apex_dental");
+      const res = await updateLeadStatusAction(leadId, targetStatus, oldStatus, currentOrgId);
       if (!res.success) {
         // Revert optimistic state
         setLeads((prev) =>
@@ -85,6 +96,7 @@ export default function DashboardPage() {
   };
 
   const handleApproveLead = async (leadId: string) => {
+    const previousLeads = [...leads];
     // Optimistic UI state mutation
     setLeads((prev) =>
       prev.map((l) =>
@@ -93,12 +105,19 @@ export default function DashboardPage() {
           : l
       )
     );
-    showNotification("Follow-up draft approved and dispatched!");
 
     try {
-      await approveDraftAction(leadId);
+      const res = await approveDraftAction(leadId);
+      if (res?.success === false) {
+        setLeads(previousLeads);
+        showNotification(`Failed to approve lead: ${res.error || "Unknown error"}`);
+      } else {
+        showNotification("Follow-up draft approved and dispatched!");
+      }
     } catch (err: unknown) {
+      setLeads(previousLeads);
       const msg = err instanceof Error ? err.message : String(err);
+      showNotification(`Failed to approve lead: ${msg}`);
       console.warn(`[DashboardPage] Approve action notice: ${msg}`);
     }
   };
@@ -111,7 +130,7 @@ export default function DashboardPage() {
     try {
       await createLeadAction({
         ...newLead,
-        org_id: "org_apex_dental",
+        org_id: currentOrgId,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -120,12 +139,20 @@ export default function DashboardPage() {
   };
 
   const handleDeleteLead = async (leadId: string) => {
+    const previousLeads = [...leads];
     setLeads((prev) => prev.filter((l) => l.id !== leadId));
-    showNotification("Lead removed from pipeline");
     try {
-      await deleteLeadAction(leadId, "org_apex_dental");
+      const res = await deleteLeadAction(leadId, currentOrgId);
+      if (res?.success === false) {
+        setLeads(previousLeads);
+        showNotification(`Failed to delete lead: ${res.error || "Unknown error"}`);
+      } else {
+        showNotification("Lead removed from pipeline");
+      }
     } catch (err: unknown) {
+      setLeads(previousLeads);
       const msg = err instanceof Error ? err.message : String(err);
+      showNotification(`Failed to delete lead: ${msg}`);
       console.warn(`[DashboardPage] Delete lead notice: ${msg}`);
     }
   };
@@ -133,7 +160,7 @@ export default function DashboardPage() {
   const handleResendTouch = async (leadId: string) => {
     showNotification("Follow-up touch queued for dispatch");
     try {
-      await resendFollowUpAction(leadId, "org_apex_dental");
+      await resendFollowUpAction(leadId, currentOrgId);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[DashboardPage] Resend notice: ${msg}`);
@@ -159,7 +186,9 @@ export default function DashboardPage() {
   const bookedCount = leads.filter((l) => l.status === "booked").length;
   const contactedCount = leads.filter((l) => l.status === "contacted").length;
   const repliedCount = leads.filter((l) => l.status === "replied").length;
-  const estimatedRecoveredRevenue = bookedCount * 1250;
+  const estimatedRecoveredRevenue = leads
+    .filter((l) => l.status === "booked")
+    .reduce((sum, l) => sum + estimateLeadValue(l), 0);
 
   return (
     <AppShell
@@ -172,7 +201,11 @@ export default function DashboardPage() {
       <div className="space-y-6">
         {/* Toast Notification */}
         {notification && (
-          <div className="fixed bottom-6 right-6 z-50 rounded-xl bg-slate-900 px-4 py-3 text-sm text-white shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+          <div
+            role="status"
+            aria-live="polite"
+            className="fixed bottom-6 right-6 z-50 rounded-xl bg-slate-900 px-4 py-3 text-sm text-white shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2"
+          >
             <span className="h-2 w-2 rounded-full bg-emerald-400" />
             <span>{notification}</span>
           </div>

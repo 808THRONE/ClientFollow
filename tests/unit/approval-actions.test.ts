@@ -44,6 +44,8 @@ describe("Approval Queue Service & Server Actions", () => {
       data: {
         lead_id: "lead_100",
         step_id: "step_2",
+        step_number: 1,
+        approved_by: "system_operator",
         approved_message: "Hi Dr. Evans, just following up regarding your tooth implant inquiry!",
       },
     });

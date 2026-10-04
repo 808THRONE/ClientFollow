@@ -45,6 +45,7 @@ export type ClientFollowEvents = {
   "app/lead.replied": {
     data: {
       lead_id: string;
+      org_id?: string;
       channel: string;
       reply_snippet: string;
       sentiment: "neutral" | "positive" | "objection" | "unsubscribed";

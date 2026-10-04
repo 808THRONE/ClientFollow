@@ -1,6 +1,13 @@
 import { isHeuristicNoise } from "@/lib/intelligence/filter";
 import { getPlaybookForIndustry } from "./playbook.service";
-import { substituteTemplateVariables } from "./channel-dispatcher.service";
+import { substituteTemplateVariables } from "./template-substitute";
+import {
+  INDUSTRY_DEAL_BENCHMARKS,
+  calculateRecoveredPipelineValue,
+  estimateLeadValue,
+} from "./lead-valuation";
+
+export { INDUSTRY_DEAL_BENCHMARKS, calculateRecoveredPipelineValue, estimateLeadValue };
 
 export interface RawHistoricalMessage {
   id: string;
@@ -21,61 +28,6 @@ export interface ScannedLeadResult {
   receivedAt: Date;
   suggestedFirstTouch: string;
 }
-
-const INDUSTRY_DEAL_BENCHMARKS: Record<string, { default: number; keywords: Record<string, number> }> = {
-  dentist: {
-    default: 450,
-    keywords: {
-      implant: 3500,
-      invisalign: 4000,
-      ortho: 3500,
-      whitening: 450,
-      crown: 1200,
-      veneers: 5000,
-      cleaning: 250,
-    },
-  },
-  agency: {
-    default: 3500,
-    keywords: {
-      retainer: 5000,
-      seo: 3000,
-      ads: 4000,
-      website: 7500,
-      redesign: 8000,
-    },
-  },
-  photographer: {
-    default: 2000,
-    keywords: {
-      wedding: 3500,
-      elopement: 2200,
-      portrait: 600,
-      headshots: 450,
-      commercial: 4000,
-    },
-  },
-  lawyer: {
-    default: 2500,
-    keywords: {
-      incorporation: 1500,
-      trademark: 1800,
-      litigation: 6000,
-      divorce: 4500,
-      estate: 3000,
-    },
-  },
-  home_services: {
-    default: 1800,
-    keywords: {
-      roof: 7500,
-      hvac: 5500,
-      plumbing: 1200,
-      remodel: 9000,
-      leak: 850,
-    },
-  },
-};
 
 /**
  * Scans historical email/WhatsApp threads, filtering out noise and extracting unrecovered leads.
@@ -148,9 +100,3 @@ export function scanHistoricalThreads(params: {
   return leads;
 }
 
-/**
- * Calculates aggregate pipeline revenue across scanned leads.
- */
-export function calculateRecoveredPipelineValue(leads: Array<{ estimatedValue: number }>): number {
-  return leads.reduce((sum, lead) => sum + (lead.estimatedValue || 0), 0);
-}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { inngest } from "@/inngest/client";
 import { createServerSupabaseClient } from "@/lib/db/client";
+import { idempotencyService } from "@/lib/services/idempotency.service";
 import { env } from "@/lib/env";
 import { logger } from "@/lib/logger";
 import crypto from "crypto";
@@ -82,6 +83,20 @@ export async function POST(req: NextRequest) {
       const textBody = message.text?.body || "";
       const messageId = message.id;
 
+      // Enforce idempotency: prevent processing duplicate messages
+      if (messageId && (await idempotencyService.isEventProcessed(messageId))) {
+        logger.info("WhatsApp duplicate message ignored", {
+          service: "WhatsAppWebhook",
+          messageId,
+        });
+        return NextResponse.json({
+          success: true,
+          messageId,
+          duplicate: true,
+          note: "Message already processed",
+        });
+      }
+
       let matchedLeadId: string | null = null;
       let matchedOrgId: string | null = null;
 
@@ -147,7 +162,21 @@ export async function POST(req: NextRequest) {
           });
         }
 
+        if (messageId) {
+          await idempotencyService.markEventProcessed(messageId, {
+            fromPhone,
+            matchedLeadId,
+          });
+        }
+
         return NextResponse.json({ success: true, messageId, leadId: matchedLeadId });
+      }
+
+      if (messageId) {
+        await idempotencyService.markEventProcessed(messageId, {
+          fromPhone,
+          matched: false,
+        });
       }
 
       logger.info("WhatsApp message received from unknown sender; no active lead cadence matched", {
