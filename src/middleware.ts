@@ -9,6 +9,7 @@ import { SESSION_COOKIE } from "@/lib/session-constants";
 const PUBLIC_PATHS = [
   "/login",
   "/signup",
+  "/verify-email",
   "/terms",
   "/privacy",
   "/auth/callback",
@@ -23,6 +24,7 @@ const PUBLIC_PATHS = [
   "/api/auth/session",
   "/api/auth/login",
   "/api/auth/signup",
+  "/api/auth/resend-verification",
   "/api/health",
   "/icon.svg",
   "/favicon.ico",

@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
         email,
         password,
         options: {
+          emailRedirectTo: `${env.APP_URL.replace(/\/+$/, "")}/auth/callback`,
           data: {
             organization_name: businessName,
             industry,
@@ -121,6 +122,22 @@ export async function POST(req: NextRequest) {
         logger.warn("Non-fatal: could not create org DB row during signup", {
           service: "AuthSignup",
           error: e instanceof Error ? e.message : String(e),
+        });
+      }
+
+      // If Supabase email confirmation is enabled, session will be null until verified
+      if (!authData.session) {
+        logger.info("Supabase user signed up, awaiting email verification", {
+          service: "AuthSignup",
+          email,
+          userId: authData.user.id,
+        });
+
+        return NextResponse.json({
+          success: true,
+          requiresVerification: true,
+          redirectUrl: `/verify-email?email=${encodeURIComponent(email)}`,
+          data: { email, orgId, requiresVerification: true },
         });
       }
 
